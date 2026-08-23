@@ -122,7 +122,17 @@ final class StaticAnalysisGateTest extends TestCase
         (new StaticAnalysisGate())->run($baseline, new ToolResolver($this->tmpDir));
     }
 
-    private function createBaseline(string $memoryLimit): Baseline
+    public function test_non_string_phpstan_memory_limit_is_rejected(): void
+    {
+        $baseline = $this->createBaseline(4096);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid PHPStan memory limit');
+
+        (new StaticAnalysisGate())->run($baseline, new ToolResolver($this->tmpDir));
+    }
+
+    private function createBaseline(mixed $memoryLimit): Baseline
     {
         $baseline = new Baseline($this->tmpDir);
         $baseline->write([

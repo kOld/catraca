@@ -71,6 +71,14 @@ final class ConfigValidateCommand extends ProjectCommand
         $options = is_array($tools['options'] ?? null) ? $tools['options'] : [];
         $magoOptions = is_array($options['mago'] ?? null) ? $options['mago'] : [];
 
+        try {
+            $baseline->getPhpstanMemoryLimit();
+        } catch (Throwable $exception) {
+            $output->writeln('<error>' . $exception->getMessage() . '</error>');
+
+            return Command::FAILURE;
+        }
+
         /** @var mixed $magoLevelRaw */
         $magoLevelRaw = $magoOptions['minimum_report_level'] ?? 'error';
         $magoLevel = is_string($magoLevelRaw) ? $magoLevelRaw : 'error';

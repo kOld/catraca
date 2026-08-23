@@ -39,7 +39,7 @@ final readonly class SarifFormatter
         $run = [
             'tool' => ['driver' => [
                 'name' => 'Catraca',
-                'informationUri' => 'https://github.com/b7s/catraca',
+                'informationUri' => 'https://github.com/kOld/catraca',
                 'rules' => array_map(static fn($gate): array => [
                     'id' => 'catraca.' . $gate->name,
                     'shortDescription' => ['text' => $gate->label],

@@ -248,11 +248,14 @@ class Baseline
 
     public function getPhpstanMemoryLimit(): string
     {
-        $memoryLimit = strtoupper($this->getStringConfig(
-            'tools',
-            'options.phpstan.memory_limit',
-            '512M',
-        ));
+        $configured = $this->getConfig('tools', 'options.phpstan.memory_limit', '512M');
+        if (!is_string($configured)) {
+            throw new InvalidArgumentException(
+                'Invalid PHPStan memory limit. Use a PHP memory value such as 512M, 4G, or -1.',
+            );
+        }
+
+        $memoryLimit = strtoupper($configured);
 
         if (preg_match('/^(?:-1|[0-9]+[KMG]?)$/', $memoryLimit) !== 1) {
             throw new InvalidArgumentException(sprintf(
