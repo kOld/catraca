@@ -6,10 +6,13 @@ namespace B7S\Catraca;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use InvalidArgumentException;
 
+use function array_key_exists;
 use function array_filter;
 use function array_merge;
 use function array_replace_recursive;
+use function explode;
 use function hash;
 use function is_array;
 use function is_bool;
@@ -17,8 +20,11 @@ use function is_int;
 use function is_string;
 use function max;
 use function min;
+use function preg_match;
 use function serialize;
+use function sprintf;
 use function strtolower;
+use function strtoupper;
 
 class Baseline
 {
@@ -240,6 +246,24 @@ class Baseline
         return strtolower($tool);
     }
 
+    public function getPhpstanMemoryLimit(): string
+    {
+        $memoryLimit = strtoupper($this->getStringConfig(
+            'tools',
+            'options.phpstan.memory_limit',
+            '512M',
+        ));
+
+        if (preg_match('/^(?:-1|[0-9]+[KMG]?)$/', $memoryLimit) !== 1) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid PHPStan memory limit "%s". Use a PHP memory value such as 512M, 4G, or -1.',
+                $memoryLimit,
+            ));
+        }
+
+        return $memoryLimit;
+    }
+
     public function getMagoThreads(): int
     {
         $configured = $this->getIntConfig('tools', 'options.mago.threads', 0);
@@ -428,11 +452,25 @@ class Baseline
             }
         }
 
-        if (!is_array($groupData[$section] ?? null)) {
+        $sectionData = $groupData[$section] ?? null;
+        if (!is_array($sectionData)) {
             return $default;
         }
 
-        return $groupData[$section][$key] ?? $default;
+        if (array_key_exists($key, $sectionData)) {
+            return $sectionData[$key];
+        }
+
+        $value = $sectionData;
+        foreach (explode('.', $key) as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return $default;
+            }
+
+            $value = $value[$segment];
+        }
+
+        return $value;
     }
 
     /**

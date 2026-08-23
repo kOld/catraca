@@ -14,6 +14,8 @@ use B7S\Catraca\GateToolRegistry;
 use B7S\Catraca\MagoRunner;
 use B7S\Catraca\SourcePathResolver;
 use B7S\Catraca\ToolResolver;
+use JsonException;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 
 use function array_slice;
@@ -21,7 +23,10 @@ use function count;
 use function is_array;
 use function is_int;
 use function is_string;
+use function json_decode;
 use function sprintf;
+
+use const JSON_THROW_ON_ERROR;
 
 readonly class StaticAnalysisGate implements GateInterface
 {
@@ -68,7 +73,7 @@ readonly class StaticAnalysisGate implements GateInterface
             $resolver->resolvePhp(),
             $phpstan,
             'analyse',
-            '--memory-limit=512M',
+            '--memory-limit=' . $baseline->getPhpstanMemoryLimit(),
             '--error-format=json',
             '--no-progress',
         ];
@@ -83,7 +88,30 @@ readonly class StaticAnalysisGate implements GateInterface
 
         $output = $process->getOutput() !== '' ? $process->getOutput() : $process->getErrorOutput();
         /** @var mixed $data */
-        $data = json_decode($output, true);
+        try {
+            $data = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new RuntimeException(sprintf(
+                'PHPStan returned invalid JSON (exit code %s): %s',
+                $process->getExitCode() ?? 'unknown',
+                $exception->getMessage(),
+            ), previous: $exception);
+        }
+
+        if (!is_array($data) || !is_array($data['totals'] ?? null)) {
+            throw new RuntimeException(sprintf(
+                'PHPStan returned an invalid result (exit code %s).',
+                $process->getExitCode() ?? 'unknown',
+            ));
+        }
+
+        $exitCode = $process->getExitCode();
+        if ($exitCode !== 0 && $exitCode !== 1) {
+            throw new RuntimeException(sprintf(
+                'PHPStan failed with exit code %s.',
+                $exitCode ?? 'unknown',
+            ));
+        }
 
         /** @var array<int, array{file: string, line: int, message: string, ignorable: bool}> $errors */
         $errors = [];

@@ -93,6 +93,10 @@ Default baseline:
 
 You can edit `catraca_baseline.json` directly to adjust thresholds.
 
+The PHPStan child process uses `tools.options.phpstan.memory_limit`, defaulting to
+`512M`. Set it to a value appropriate for the project, such as `4G`, when PHPStan
+needs more memory. Catraca validates the value and passes it directly to PHPStan.
+
 ### Configuration — `catraca_baseline.json`
 
 Configuration and measured results are stored separately:
@@ -123,6 +127,9 @@ Configuration and measured results are stored separately:
                     "threads": 0,
                     "minimum_report_level": "error",
                     "minimum_version": "1.45.0"
+                },
+                "phpstan": {
+                    "memory_limit": "512M"
                 }
             }
         },

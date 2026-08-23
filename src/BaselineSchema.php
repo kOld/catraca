@@ -58,6 +58,9 @@ final class BaselineSchema
                             'minimum_report_level' => 'error',
                             'minimum_version' => GateToolRegistry::MINIMUM_MAGO_VERSION,
                         ],
+                        'phpstan' => [
+                            'memory_limit' => '512M',
+                        ],
                     ],
                 ],
                 'history' => ['enabled' => false, 'retention' => 50],

@@ -11,8 +11,8 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/b7s/catraca/issues",
-        "source": "https://github.com/b7s/catraca"
+        "issues": "https://github.com/kOld/catraca/issues",
+        "source": "https://github.com/kOld/catraca"
     },
     "require": {
         "php": "^8.3",
