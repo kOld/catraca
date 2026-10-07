@@ -166,6 +166,29 @@ final class BaselineTest extends TestCase
         self::assertSame(72.5, $profile->getResult('coverage', 'percentage'));
     }
 
+    public function test_named_profile_results_inherit_unspecified_default_metrics(): void
+    {
+        $default = new Baseline($this->tmpDir);
+        $default->write([
+            'config' => [],
+            'results' => [
+                'complexity' => ['max_ccn' => 74, 'violations' => 6, 'warnings' => 89],
+                'duplication' => ['percentage' => 1.61, 'clones' => 184],
+            ],
+        ]);
+
+        $profile = new Baseline($this->tmpDir, profile: 'staging');
+        $profile->updateResults([
+            'duplication' => ['percentage' => 1.36],
+        ]);
+
+        self::assertSame(74, $profile->getResult('complexity', 'max_ccn'));
+        self::assertSame(6, $profile->getResult('complexity', 'violations'));
+        self::assertSame(89, $profile->getResult('complexity', 'warnings'));
+        self::assertSame(1.36, $profile->getResult('duplication', 'percentage'));
+        self::assertSame(184, $profile->getResult('duplication', 'clones'));
+    }
+
     public function test_migrates_legacy_gate_tools_to_generic_operations(): void
     {
         $baseline = new Baseline($this->tmpDir);

@@ -485,7 +485,7 @@ class Baseline
         if ($this->profile !== 'default') {
             $profileData = $data['profiles'][$this->profile][$group] ?? [];
             if (is_array($profileData)) {
-                $groupData = $group === 'config' ? array_replace_recursive($groupData, $profileData) : $profileData;
+                $groupData = array_replace_recursive($groupData, $profileData);
             }
         }
 
