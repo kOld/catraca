@@ -54,6 +54,15 @@ final class StaticAnalysisGateTest extends TestCase
                 exit(1);
             }
 
+            if ($mode === 'global-errors') {
+                echo json_encode([
+                    'totals' => ['errors' => 0, 'file_errors' => 0],
+                    'files' => [],
+                    'errors' => ['PHPStan worker crashed while loading the project'],
+                ]);
+                exit(1);
+            }
+
             echo json_encode([
                 'totals' => ['errors' => 0, 'file_errors' => 0],
                 'files' => [],
@@ -99,6 +108,26 @@ final class StaticAnalysisGateTest extends TestCase
 
         self::assertSame(Status::Fail, $result->status);
         self::assertSame(['errors' => 2], $result->current);
+    }
+
+    public function test_phpstan_global_errors_are_preserved_as_quality_failures(): void
+    {
+        file_put_contents($this->tmpDir . '/phpstan-mode', 'global-errors');
+        $baseline = $this->createBaseline('4G');
+
+        $result = (new StaticAnalysisGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertSame(['errors' => 1], $result->current);
+        self::assertSame(
+            'PHPStan worker crashed while loading the project',
+            $result->details['errors'][0]['message'],
+        );
+        self::assertSame(
+            'PHPStan worker crashed while loading the project',
+            $result->details['errors'][0]['raw'],
+        );
+        self::assertSame('[global]', $result->details['errors'][0]['file']);
     }
 
     public function test_invalid_phpstan_output_fails_closed(): void

@@ -21,6 +21,13 @@ class CheckCommand extends ProjectCommand
     {
         $this->addStandardOptions();
         $this->addOption('fix', null, InputOption::VALUE_NONE, 'Auto-fix issues if any gate fails');
+        $this->addOption(
+            'gates',
+            null,
+            InputOption::VALUE_REQUIRED,
+            'Comma-separated gates to run (default: all)',
+        );
+        $this->addOption('sequential', null, InputOption::VALUE_NONE, 'Run selected gates sequentially');
     }
 
     /**

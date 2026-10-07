@@ -19,6 +19,7 @@ use RuntimeException;
 use Symfony\Component\Process\Process;
 
 use function array_slice;
+use function array_values;
 use function count;
 use function is_array;
 use function is_int;
@@ -92,16 +93,18 @@ readonly class StaticAnalysisGate implements GateInterface
             $data = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
             throw new RuntimeException(sprintf(
-                'PHPStan returned invalid JSON (exit code %s): %s',
+                'PHPStan returned invalid JSON (exit code %s): %s. Raw output: %s',
                 $process->getExitCode() ?? 'unknown',
                 $exception->getMessage(),
+                trim($output),
             ), previous: $exception);
         }
 
         if (!is_array($data) || !is_array($data['totals'] ?? null)) {
             throw new RuntimeException(sprintf(
-                'PHPStan returned an invalid result (exit code %s).',
+                'PHPStan returned an invalid result (exit code %s). Raw output: %s',
                 $process->getExitCode() ?? 'unknown',
+                trim($output),
             ));
         }
 
@@ -113,12 +116,14 @@ readonly class StaticAnalysisGate implements GateInterface
             ));
         }
 
-        /** @var array<int, array{file: string, line: int, message: string, ignorable: bool}> $errors */
+        /** @var array<int, array<string, mixed>> $errors */
         $errors = [];
         /** @var array<int, string> $files */
         $files = [];
         /** @var array{file_errors: int, errors: int} $totals */
         $totals = ['file_errors' => 0, 'errors' => 0];
+        /** @var array<int, mixed> $globalErrors */
+        $globalErrors = is_array($data['errors'] ?? null) ? array_values($data['errors']) : [];
 
         if (is_array($data)) {
             /** @var array<string, mixed> $rawTotals */
@@ -151,7 +156,18 @@ readonly class StaticAnalysisGate implements GateInterface
             }
         }
 
-        $errorCount = $totals['file_errors'] + $totals['errors'];
+        foreach ($globalErrors as $globalError) {
+            $errors[] = [
+                'file' => '[global]',
+                'line' => 0,
+                'message' => is_string($globalError) ? $globalError : (string) json_encode($globalError),
+                'ignorable' => false,
+                'raw' => $globalError,
+            ];
+            $files[] = '[global]:0';
+        }
+
+        $errorCount = $totals['file_errors'] + $totals['errors'] + count($globalErrors);
 
         return $this->buildResult($errorCount, $errors, $files, $baseline, 'PHPStan');
     }

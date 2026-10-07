@@ -96,6 +96,13 @@ You can edit `catraca_baseline.json` directly to adjust thresholds.
 The PHPStan child process uses `tools.options.phpstan.memory_limit`, defaulting to
 `512M`. Set it to a value appropriate for the project, such as `4G`, when PHPStan
 needs more memory. Catraca validates the value and passes it directly to PHPStan.
+PHPCPD and PHP Metrics child processes use an isolated `1G` PHP memory limit so a
+quality worker cannot consume the parent process budget.
+
+Pint and PHP CS Fixer persist their native caches outside `vendor` by default:
+`.pint.cache` and `.catraca-cache/performance-php-cs-fixer.cache`. Override these
+paths under `config.tools.options.pint.cache_file` and
+`config.tools.options.php_cs_fixer.cache_file` when CI uses a shared cache path.
 
 ### Configuration — `catraca_baseline.json`
 
@@ -130,6 +137,12 @@ Configuration and measured results are stored separately:
                 },
                 "phpstan": {
                     "memory_limit": "512M"
+                },
+                "php_cs_fixer": {
+                    "cache_file": ".catraca-cache/performance-php-cs-fixer.cache"
+                },
+                "pint": {
+                    "cache_file": ".pint.cache"
                 }
             }
         },
@@ -163,6 +176,7 @@ Configuration and measured results are stored separately:
         },
         "performance": {
             "mode": "no_regression",
+            "informational_rules": [],
             "rules": {
                 "global_namespace_import": true,
                 "no_unused_imports": true,
@@ -273,6 +287,12 @@ For gates with interchangeable backends, set the value under `config.tools` to `
 
 The Mago mappings stay separate: formatter findings update `results.style`, analyzer findings update `results.static_analysis`, and linter findings contribute to `results.performance`. Mago does not replace PHPCPD duplication percentages or PHP Metrics complexity values.
 
+When PHP CS Fixer runs the performance gate, its JSON report is partitioned by
+rule. Add existing fixer rule keys to `performance.informational_rules` while
+they are being paid down; they remain visible in `details.rules.counts` without
+blocking the gate. Rules with no executable analyzer are listed in
+`details.rules.unexecuted` and block unless explicitly informational.
+
 ### `catraca check` — Run quality gates
 
 Runs all 8 gates and compares against baseline. If `catraca_baseline.json` doesn't exist, it is created automatically.
@@ -296,7 +316,14 @@ vendor/bin/catraca check --path=/path/to/project
 
 # Auto-fix issues if any gate fails, then verify
 vendor/bin/catraca check --fix
+
+# Run only selected gates, serially when a runner has limited memory
+vendor/bin/catraca check --gates=style,static_analysis --sequential
 ```
+
+Gate names accepted by `--gates` are `security`, `style`, `static_analysis`,
+`coverage`, `duplication`, `file_size`, `complexity`, and `performance`. The
+option rejects unknown, empty, or duplicate names.
 
 In an interactive terminal, human output is a live Symfony Console table. Queued gates wait for a worker, active gates display an animated spinner, and each row changes immediately to `PASS`, `FAIL`, `WARN`, or `SKIP` with its measured description. Plain, JSON, and GitHub formats remain non-interactive.
 

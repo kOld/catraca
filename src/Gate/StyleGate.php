@@ -19,9 +19,12 @@ use Symfony\Component\Process\Process;
 
 use function array_slice;
 use function count;
+use function dirname;
 use function is_array;
+use function is_dir;
 use function is_int;
 use function is_string;
+use function mkdir;
 use function sprintf;
 
 readonly class StyleGate implements GateInterface
@@ -67,7 +70,15 @@ readonly class StyleGate implements GateInterface
 
     private function runPint(string $pint, Baseline $baseline, ToolResolver $resolver): GateResult
     {
-        $process = new Process([$resolver->resolvePhp(), $pint, '--test'], timeout: $baseline->getGateTimeout('style'));
+        $cacheFile = $baseline->getPintCacheFile();
+        $cacheDir = dirname($cacheFile);
+        if (!is_dir($cacheDir)) {
+            mkdir($cacheDir, 0755, true);
+        }
+        $process = new Process(
+            [$resolver->resolvePhp(), $pint, '--test', '--cache-file=' . $cacheFile],
+            timeout: $baseline->getGateTimeout('style'),
+        );
         $process->run();
 
         $output = $process->getOutput();
@@ -133,9 +144,17 @@ readonly class StyleGate implements GateInterface
 
         $result = CsFixerResultParser::parseJsonOutput($process->getOutput());
 
+        if (!$result['valid']) {
+            $result['violations'] = max(1, $result['violations']);
+            $result['files'][] = 'PHP CS Fixer returned an invalid JSON report';
+        }
         if ($result['violations'] === 0 && $process->getExitCode() !== 0) {
             $result['violations'] =
                 substr_count($process->getOutput(), '1)') + substr_count($process->getOutput(), '2)');
+            if ($result['violations'] === 0) {
+                $result['violations'] = 1;
+                $result['files'][] = 'PHP CS Fixer failed with exit code ' . ($process->getExitCode() ?? 'unknown');
+            }
         }
 
         return $this->buildStyleResult($result['violations'], $result['files'], $baseline, toolName: 'PHP CS Fixer');

@@ -24,15 +24,24 @@ jobs:
           tools: composer, phpstan/phpstan, laravel/pint, phpmetrics/phpmetrics
 
       - name: Cache Composer packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: vendor
-          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+          path: |
+            vendor
+            .catraca-cache
+            .pint.cache
+          key: ${{ runner.os }}-php-${{ hashFiles('composer.json', 'composer.lock', 'catraca_baseline.json', 'mago.toml') }}
           restore-keys: |
             ${{ runner.os }}-php-
 
       - name: Install Dependencies
         run: composer install --no-interaction --prefer-dist
+
+      - name: Validate Package
+        run: composer validate --no-check-publish
+
+      - name: Run Unit Tests
+        run: vendor/bin/phpunit --no-coverage
 
       - name: Check Quality
         run: ./bin/catraca --format=github --plain

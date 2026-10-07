@@ -20,12 +20,25 @@ use Symfony\Component\Process\Process;
 
 use function array_merge;
 use function array_slice;
+use function array_filter;
+use function array_map;
+use function array_unique;
 use function count;
+use function array_keys;
+use function array_values;
+use function dirname;
+use function is_dir;
 use function is_array;
 use function is_bool;
 use function is_int;
 use function is_string;
+use function in_array;
+use function implode;
 use function sprintf;
+use function str_contains;
+use function strtolower;
+use function trim;
+use function mkdir;
 
 readonly class PerformanceGate implements GateInterface
 {
@@ -43,6 +56,12 @@ readonly class PerformanceGate implements GateInterface
         $messages = [];
         $reasons = [];
         $hasTool = false;
+        $analyzedRules = [];
+        $unexecutedRules = [];
+        $unsupportedRules = [];
+        $ruleCounts = [];
+        $informationalRules = $this->getInformationalRules($baseline);
+        $executedTools = [];
 
         $enabledRules = $this->getEnabledRules($baseline);
         $tool = GateToolRegistry::resolve($baseline, $resolver, 'performance');
@@ -53,6 +72,8 @@ readonly class PerformanceGate implements GateInterface
         if ($mago !== null) {
             $result = $this->magoRunner->diagnostics($mago, 'lint', $paths, $baseline);
             $hasTool = true;
+            $executedTools[] = 'mago';
+            $analyzedRules = ['autoload_optimization', 'condition_order'];
             $violations = $result->issueCount();
             $files = $result->files();
 
@@ -74,10 +95,37 @@ readonly class PerformanceGate implements GateInterface
                     $rulesJson,
                     $paths,
                     $baseline->getGateTimeout('performance'),
+                    $baseline->getPhpCsFixerCacheFile(),
                 );
                 $hasTool = true;
                 $violations = $result['violations'];
                 $files = $result['files'];
+                $ruleCounts = $result['rule_counts'];
+                $analyzedRules = array_values(array_filter(
+                    array_keys($this->getRuleRegistry()),
+                    static fn(string $rule): bool => ($enabledRules[$rule] ?? false) === true,
+                ));
+                $unsupportedRules = $result['unsupported_rules'];
+                $executedTools[] = 'php-cs-fixer';
+
+                if ($ruleCounts !== []) {
+                    $informationalCount = 0;
+                    $blockingCount = 0;
+                    foreach ($ruleCounts as $rule => $ruleCount) {
+                        if (in_array($rule, $informationalRules, true)) {
+                            $informationalCount += $ruleCount;
+                        } else {
+                            $blockingCount += $ruleCount;
+                        }
+                    }
+                    $violations = $blockingCount;
+                    if ($informationalCount > 0) {
+                        $messages[] = sprintf(
+                            '%d informational performance improvement(s) found',
+                            $informationalCount,
+                        );
+                    }
+                }
 
                 if ($violations > self::MAX_VIOLATIONS) {
                     $messages[] = sprintf('%d files with performance improvements available', $violations);
@@ -89,23 +137,49 @@ readonly class PerformanceGate implements GateInterface
             $autoloadResult = $this->checkAutoloadOptimization($resolver);
             if ($autoloadResult !== null) {
                 $hasTool = true;
+                $executedTools[] = 'composer autoload optimization';
                 $violations += $autoloadResult['violations'];
                 $files = array_merge($files, $autoloadResult['files']);
                 if ($autoloadResult['violations'] > self::MAX_VIOLATIONS) {
                     $messages[] = $autoloadResult['message'];
                 }
+                $analyzedRules[] = 'autoload_optimization';
             }
         }
 
         if ($enabledRules['condition_order'] ?? true) {
             $conditionResult = $this->checkConditionOrder($paths);
             $hasTool = true;
+            $executedTools[] = 'condition-order scanner';
             $violations += $conditionResult['violations'];
             $files = array_merge($files, $conditionResult['files']);
             $reasons = array_merge($reasons, $conditionResult['reasons']);
             if ($conditionResult['violations'] > self::MAX_VIOLATIONS) {
                 $messages[] = $conditionResult['message'];
             }
+            $analyzedRules[] = 'condition_order';
+        }
+
+        foreach ($enabledRules as $rule => $enabled) {
+            if ($enabled && !in_array($rule, $analyzedRules, true)) {
+                $unexecutedRules[] = $rule;
+            }
+        }
+        $unexecutedRules = array_values(array_unique(array_merge($unexecutedRules, $unsupportedRules)));
+        $blockingUnexecutedRules = array_values(array_filter(
+            $unexecutedRules,
+            static fn(string $rule): bool => !in_array($rule, $informationalRules, true),
+        ));
+        if ($unexecutedRules !== []) {
+            $violations += count($blockingUnexecutedRules);
+            $messages[] = sprintf('No executable analyzer for: %s', implode(', ', $unexecutedRules));
+            $reasons = array_merge(
+                $reasons,
+                array_map(
+                    static fn(string $rule): string => $rule . ' was not analyzed',
+                    $unexecutedRules,
+                ),
+            );
         }
 
         if (!$hasTool) {
@@ -134,6 +208,17 @@ readonly class PerformanceGate implements GateInterface
             baseline: ['violations' => $baselineViolations],
             current: ['violations' => $violations],
             actions: $actions,
+            details: [
+                'rules' => [
+                    'configured' => array_keys(array_filter($enabledRules)),
+                    'analyzed' => array_values(array_unique($analyzedRules)),
+                    'unsupported' => $unsupportedRules,
+                    'unexecuted' => $unexecutedRules,
+                    'informational' => $informationalRules,
+                    'counts' => $ruleCounts,
+                ],
+                'tools' => array_values(array_unique($executedTools)),
+            ],
         );
     }
 
@@ -215,7 +300,7 @@ readonly class PerformanceGate implements GateInterface
                 foreach ($decoded as $name => $cfg) {
                     $rules[$name] = $cfg;
                 }
-            } elseif (is_string($decoded) || is_bool($decoded)) {
+            } else {
                 $rules[$config['rule']] = true;
             }
         }
@@ -247,9 +332,24 @@ readonly class PerformanceGate implements GateInterface
         return $defaults;
     }
 
+    /** @return array<int, string> */
+    private function getInformationalRules(Baseline $baseline): array
+    {
+        /** @var array<string, mixed> $configured */
+        $configured = $baseline->getArrayConfig('performance', 'informational_rules', []);
+        $rules = [];
+        foreach ($configured as $rule) {
+            if (is_string($rule) && $rule !== '') {
+                $rules[] = $rule;
+            }
+        }
+
+        return $rules;
+    }
+
     /**
      * @param  array<int, string>  $paths
-     * @return array{violations: int, files: array<int, string>}
+     * @return array{violations: int, files: array<int, string>, rule_counts: array<string, int>, unsupported_rules: array<int, string>, valid: bool}
      */
     private function runCsFixerRules(
         string $fixer,
@@ -257,7 +357,19 @@ readonly class PerformanceGate implements GateInterface
         string $rulesJson,
         array $paths,
         ?float $timeout,
+        string $cacheFile,
     ): array {
+        $cacheDir = dirname($cacheFile);
+        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0755, true) && !is_dir($cacheDir)) {
+            return [
+                'violations' => 1,
+                'files' => ['Unable to create PHP CS Fixer cache directory: ' . $cacheDir],
+                'rule_counts' => [],
+                'unsupported_rules' => [],
+                'valid' => false,
+            ];
+        }
+
         $cmd = [
             $resolver->resolvePhp(),
             $fixer,
@@ -265,8 +377,10 @@ readonly class PerformanceGate implements GateInterface
             '--dry-run',
             '--diff',
             '--allow-risky=yes',
-            '--using-cache=no',
+            '--using-cache=yes',
+            '--cache-file=' . $cacheFile,
             '--format=json',
+            '--verbose',
             '--rules=' . $rulesJson,
         ];
         foreach ($paths as $path) {
@@ -277,7 +391,35 @@ readonly class PerformanceGate implements GateInterface
         $process = new Process($cmd, timeout: $timeout);
         $process->run();
 
-        return CsFixerResultParser::parseJsonOutput($process->getOutput());
+        $result = CsFixerResultParser::parseJsonOutput($process->getOutput());
+        if (!$result['valid']) {
+            $result['violations'] = max(1, $result['violations']);
+            $result['files'][] = 'PHP CS Fixer returned an invalid JSON report';
+        }
+        if ($result['violations'] === 0 && $process->getExitCode() !== 0) {
+            $result['violations'] = 1;
+            $result['files'][] = 'PHP CS Fixer failed with exit code ' . ($process->getExitCode() ?? 'unknown');
+        }
+
+        $output = strtolower($process->getOutput() . "\n" . $process->getErrorOutput());
+        $unsupportedRules = [];
+        if ($process->getExitCode() !== 0) {
+            foreach (array_keys(self::getRuleRegistry()) as $rule) {
+                if (
+                    str_contains($output, strtolower($rule))
+                    && (str_contains($output, 'invalid')
+                        || str_contains($output, 'unknown')
+                        || str_contains($output, 'does not exist')
+                        || str_contains($output, 'cannot find'))
+                ) {
+                    $unsupportedRules[] = $rule;
+                }
+            }
+        }
+
+        $result['unsupported_rules'] = $unsupportedRules;
+
+        return $result;
     }
 
     /**

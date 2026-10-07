@@ -17,10 +17,14 @@ use Symfony\Component\Process\Process;
 
 use function array_slice;
 use function count;
+use function file_exists;
+use function file_get_contents;
 use function is_array;
 use function is_int;
+use function is_numeric;
 use function is_string;
 use function sprintf;
+use function str_contains;
 
 class ComplexityGate implements GateInterface
 {
@@ -50,6 +54,8 @@ class ComplexityGate implements GateInterface
 
         $process = new Process([
             $resolver->resolvePhp(),
+            '-d',
+            'memory_limit=1G',
             $phpmetrics,
             '--report-json=' . $jsonPath,
             ...(new SourcePathResolver())->resolveForBaseline($baseline),
@@ -57,9 +63,11 @@ class ComplexityGate implements GateInterface
         $process->run();
 
         $data = null;
+        $rawReport = null;
         if (file_exists($jsonPath)) {
             $content = file_get_contents($jsonPath);
             if (is_string($content)) {
+                $rawReport = $content;
                 /** @var mixed $decoded */
                 $decoded = json_decode($content, true);
                 $data = is_array($decoded) ? $decoded : null;
@@ -68,8 +76,32 @@ class ComplexityGate implements GateInterface
 
         $this->cleanup($tmpDir);
 
-        /** @var array<string, mixed>|null $data */
-        return $this->parseResult($data, $baseline);
+        $exitCode = $process->getExitCode();
+        if ($exitCode !== 0) {
+            return $this->errorResult(
+                $baseline,
+                sprintf(
+                    'PHP Metrics failed with exit code %s.',
+                    $exitCode ?? 'unknown',
+                ),
+                $process->getErrorOutput(),
+                $process->getOutput(),
+            );
+        }
+
+        if ($data === null) {
+            return $this->errorResult(
+                $baseline,
+                'PHP Metrics returned a missing or malformed JSON report.',
+                $process->getErrorOutput(),
+                $rawReport ?? $process->getOutput(),
+            );
+        }
+
+        /** @var array<string, mixed> $report */
+        $report = $data;
+
+        return $this->parseResult($report, $baseline);
     }
 
     /**
@@ -83,36 +115,36 @@ class ComplexityGate implements GateInterface
         $warnings = [];
         $maxCcn = 0;
 
-        if ($data !== null) {
-            /** @var array<string, mixed> $data */
-            $classes = $data['classes'] ?? [];
-            if (is_array($classes)) {
-                /** @var array<string, mixed> $classes */
-                $this->extractMethods($classes, $violations, $warnings, $maxCcn, static fn(
-                    mixed $key,
-                    mixed $data,
-                ): array => [
-                    is_string($key) ? $key : 'unknown',
-                    $data,
-                ]);
+        $blockAt = $baseline->getIntConfig('complexity', 'block_at', self::BLOCK_AT);
+        $warnAt = $baseline->getIntConfig('complexity', 'warn_at', self::WARN_AT);
+
+        $metricEntries = 0;
+        foreach ($data as $key => $classData) {
+            if (!is_string($key) || !is_array($classData) || !is_numeric($classData['ccnMethodMax'] ?? null)) {
+                continue;
             }
-            /** @var array<string, mixed> $data */
-            $files = $data['files'] ?? [];
-            if (is_array($files)) {
-                /** @var array<string, mixed> $files */
-                $this->extractMethods($files, $violations, $warnings, $maxCcn, static fn(
-                    mixed $key,
-                    mixed $data,
-                ): array => [
-                    is_array($data) && is_string($data['name'] ?? null) ? $data['name'] : 'unknown',
-                    is_array($data) ? $data : [],
-                ]);
+
+            $metricEntries++;
+            $ccn = (int) $classData['ccnMethodMax'];
+            $entry = ['file' => $key, 'method' => 'ccnMethodMax', 'ccn' => $ccn];
+            $maxCcn = max($maxCcn, $ccn);
+            if ($ccn >= $blockAt) {
+                $violations[] = $entry;
+            } elseif ($ccn >= $warnAt) {
+                $warnings[] = $entry;
             }
         }
 
+        if ($data !== [] && $metricEntries === 0) {
+            return $this->errorResult(
+                $baseline,
+                'PHP Metrics returned a JSON report without class complexity metrics.',
+                '',
+                (string) json_encode($data),
+            );
+        }
+
         $baselineMaxCcn = $baseline->getIntResult('complexity', 'max_ccn', 0);
-        $blockAt = $baseline->getIntConfig('complexity', 'block_at', self::BLOCK_AT);
-        $warnAt = $baseline->getIntConfig('complexity', 'warn_at', self::WARN_AT);
 
         $status = Status::Pass;
         $actions = null;
@@ -139,7 +171,7 @@ class ComplexityGate implements GateInterface
             name: 'complexity',
             label: 'Cyclomatic Complexity',
             message: sprintf(
-                'max CCN %d, %d violations (>%d), %d warnings (>%d)',
+                'max CCN %d, %d violations (>=%d), %d warnings (>=%d) via phpmetrics',
                 $maxCcn,
                 count($violations),
                 $blockAt,
@@ -158,59 +190,25 @@ class ComplexityGate implements GateInterface
         );
     }
 
-    /**
-     * @param  array<string, mixed>  $items
-     * @param  array<int, array{file: string, method: string, ccn: int}>  $violations
-     * @param  array<int, array{file: string, method: string, ccn: int}>  $warnings
-     * @param  callable(mixed $key, mixed $methodData): array{string, mixed}  $extractNameAndData
-     */
-    private function extractMethods(
-        /** @param array<string, mixed> $items */
-        array $items,
-        array &$violations,
-        array &$warnings,
-        int &$maxCcn,
-        callable $extractNameAndData,
-    ): void {
-        foreach ($items as $key => $itemData) {
-            if (!is_array($itemData)) {
-                continue;
-            }
-            /** @var mixed $methodsRaw */
-            $methodsRaw = $itemData['methods'] ?? [];
-            $methods = is_array($methodsRaw) ? $methodsRaw : [];
-            foreach ($methods as $methodKey => $methodData) {
-                [$name, $data] = $extractNameAndData($methodKey, $methodData);
-                $this->processMethod($key, $name, $data, $violations, $warnings, $maxCcn);
-            }
-        }
-    }
-
-    /**
-     * @param  array<int, array{file: string, method: string, ccn: int}>  $violations
-     * @param  array<int, array{file: string, method: string, ccn: int}>  $warnings
-     */
-    private function processMethod(
-        string $file,
-        string $name,
-        mixed $methodData,
-        array &$violations,
-        array &$warnings,
-        int &$maxCcn,
-    ): void {
-        if (!is_array($methodData)) {
-            return;
-        }
-        $ccn = is_int($methodData['ccn'] ?? null) ? $methodData['ccn'] : 1;
-        if ($ccn > $maxCcn) {
-            $maxCcn = $ccn;
-        }
-        $entry = ['file' => $file, 'method' => $name, 'ccn' => $ccn];
-        if ($ccn >= self::BLOCK_AT) {
-            $violations[] = $entry;
-        } elseif ($ccn >= self::WARN_AT) {
-            $warnings[] = $entry;
-        }
+    private function errorResult(
+        Baseline $baseline,
+        string $message,
+        string $errorOutput,
+        string $output,
+    ): GateResult {
+        return new GateResult(
+            status: Status::Fail,
+            name: 'complexity',
+            label: 'Cyclomatic Complexity',
+            message: $message,
+            severity: Severity::Block,
+            baseline: ['max_ccn' => $baseline->getIntResult('complexity', 'max_ccn', 0)],
+            current: null,
+            details: [
+                'stderr' => $errorOutput,
+                'stdout' => $output,
+            ],
+        );
     }
 
     private function cleanup(string $dir): void

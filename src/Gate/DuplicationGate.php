@@ -19,6 +19,7 @@ use function count;
 use function is_int;
 use function sprintf;
 use function strlen;
+use function str_contains;
 
 class DuplicationGate implements GateInterface
 {
@@ -50,6 +51,8 @@ class DuplicationGate implements GateInterface
 
         $command = [
             $resolver->resolvePhp(),
+            '-d',
+            'memory_limit=1G',
             $phpcpd,
             '--fuzzy',
             '--verbose',
@@ -64,6 +67,25 @@ class DuplicationGate implements GateInterface
         $process->run();
 
         $output = $process->getOutput() . $process->getErrorOutput();
+
+        if ($process->getExitCode() !== 0 && !str_contains($output, 'duplicated lines')) {
+            return new GateResult(
+                status: Status::Fail,
+                name: 'duplication',
+                label: 'Duplication',
+                message: sprintf(
+                    'PHPCPD failed with exit code %s.',
+                    $process->getExitCode() ?? 'unknown',
+                ),
+                severity: Severity::Block,
+                baseline: ['percentage' => $this->getBaselineDup($baseline)],
+                current: null,
+                details: [
+                    'stderr' => $process->getErrorOutput(),
+                    'stdout' => $process->getOutput(),
+                ],
+            );
+        }
 
         return $this->parseResult($output, $baseline);
     }

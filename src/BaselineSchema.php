@@ -61,6 +61,12 @@ final class BaselineSchema
                         'phpstan' => [
                             'memory_limit' => '512M',
                         ],
+                        'php_cs_fixer' => [
+                            'cache_file' => '.catraca-cache/performance-php-cs-fixer.cache',
+                        ],
+                        'pint' => [
+                            'cache_file' => '.pint.cache',
+                        ],
                     ],
                 ],
                 'history' => ['enabled' => false, 'retention' => 50],
@@ -78,6 +84,7 @@ final class BaselineSchema
                 ],
                 'performance' => [
                     'mode' => 'no_regression',
+                    'informational_rules' => [],
                     'rules' => [
                         'global_namespace_import' => true,
                         'no_unused_imports' => true,

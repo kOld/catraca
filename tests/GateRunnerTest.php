@@ -57,6 +57,8 @@ final class GateRunnerTest extends TestCase
 
         self::assertCount(1, $results);
         self::assertSame(['parallel_enabled' => false], $results[0]->current);
+        self::assertNotNull($results[0]->elapsedNanoseconds);
+        self::assertSame([], $results[0]->executedTools);
     }
 
     public function test_empty_gate_list_returns_without_starting_workers(): void

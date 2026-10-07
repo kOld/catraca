@@ -267,6 +267,40 @@ class Baseline
         return $memoryLimit;
     }
 
+    public function getPhpCsFixerCacheFile(): string
+    {
+        $configured = $this->getStringConfig(
+            'tools',
+            'options.php_cs_fixer.cache_file',
+            '.catraca-cache/performance-php-cs-fixer.cache',
+        );
+
+        if ($configured === '') {
+            $configured = '.catraca-cache/performance-php-cs-fixer.cache';
+        }
+
+        if (str_starts_with($configured, DIRECTORY_SEPARATOR)) {
+            return $configured;
+        }
+
+        return $this->projectRoot . '/' . ltrim($configured, '/');
+    }
+
+    public function getPintCacheFile(): string
+    {
+        $configured = $this->getStringConfig('tools', 'options.pint.cache_file', '.pint.cache');
+
+        if ($configured === '') {
+            $configured = '.pint.cache';
+        }
+
+        if (str_starts_with($configured, DIRECTORY_SEPARATOR)) {
+            return $configured;
+        }
+
+        return $this->projectRoot . '/' . ltrim($configured, '/');
+    }
+
     public function getMagoThreads(): int
     {
         $configured = $this->getIntConfig('tools', 'options.mago.threads', 0);
