@@ -41,6 +41,10 @@ final class DuplicationGateTest extends TestCase
                 fwrite(STDERR, 'phpcpd failed');
                 exit(7);
             }
+            if (trim((string) file_get_contents($root . '/duplication-mode')) === 'malformed') {
+                echo 'The report format changed';
+                exit(0);
+            }
             echo "No code clones found.\n";
             PHP);
         chmod($this->tmpDir . '/vendor/bin/phpcpd', 0755);
@@ -81,6 +85,17 @@ final class DuplicationGateTest extends TestCase
         self::assertSame(Status::Fail, $result->status);
         self::assertNull($result->current);
         self::assertSame('phpcpd failed', $result->details['stderr']);
+    }
+
+    public function test_successful_process_with_malformed_output_fails_closed(): void
+    {
+        file_put_contents($this->tmpDir . '/duplication-mode', 'malformed');
+
+        $result = $this->runGate();
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertNull($result->current);
+        self::assertSame('The report format changed', $result->details['stdout']);
     }
 
     private function runGate(): GateResult

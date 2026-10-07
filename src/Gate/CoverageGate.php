@@ -67,8 +67,7 @@ class CoverageGate implements GateInterface
         Baseline $baseline,
         ToolResolver $resolver,
         string $cwd,
-    ): GateResult
-    {
+    ): GateResult {
         $tmpDir = sys_get_temp_dir() . '/catraca-' . uniqid('', true);
         if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) {
             throw new RuntimeException(sprintf('Directory "%s" was not created', $tmpDir));
@@ -106,9 +105,11 @@ class CoverageGate implements GateInterface
 
         $message = $executionError
             ? sprintf('%s failed with exit code %s.', $toolName, $exitCode ?? 'unknown')
-            : ($coverage !== null
-                ? sprintf('%.2f%% (baseline: %.2f%%) via %s', $coverage, $baselineCoverage, $toolName)
-                : 'Could not determine coverage (is xdebug or pcov enabled?)');
+            : (
+                $coverage !== null
+                    ? sprintf('%.2f%% (baseline: %.2f%%) via %s', $coverage, $baselineCoverage, $toolName)
+                    : 'Could not determine coverage (is xdebug or pcov enabled?)'
+            );
         $details = [];
         if ($process->getErrorOutput() !== '') {
             $details['stderr'] = trim($process->getErrorOutput());

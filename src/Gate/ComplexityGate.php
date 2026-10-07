@@ -80,10 +80,7 @@ class ComplexityGate implements GateInterface
         if ($exitCode !== 0) {
             return $this->errorResult(
                 $baseline,
-                sprintf(
-                    'PHP Metrics failed with exit code %s.',
-                    $exitCode ?? 'unknown',
-                ),
+                sprintf('PHP Metrics failed with exit code %s.', $exitCode ?? 'unknown'),
                 $process->getErrorOutput(),
                 $process->getOutput(),
             );
@@ -190,12 +187,8 @@ class ComplexityGate implements GateInterface
         );
     }
 
-    private function errorResult(
-        Baseline $baseline,
-        string $message,
-        string $errorOutput,
-        string $output,
-    ): GateResult {
+    private function errorResult(Baseline $baseline, string $message, string $errorOutput, string $output): GateResult
+    {
         return new GateResult(
             status: Status::Fail,
             name: 'complexity',

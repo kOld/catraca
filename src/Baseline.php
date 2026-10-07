@@ -8,8 +8,8 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
 
-use function array_key_exists;
 use function array_filter;
+use function array_key_exists;
 use function array_merge;
 use function array_replace_recursive;
 use function explode;

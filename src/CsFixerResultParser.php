@@ -2,8 +2,8 @@
 
 namespace B7S\Catraca;
 
-use function count;
 use function array_key_exists;
+use function count;
 use function is_array;
 use function is_string;
 
@@ -23,24 +23,33 @@ class CsFixerResultParser
             $valid = true;
             $fileEntries = $data['files'];
 
-            if (is_array($fileEntries)) {
-                foreach ($fileEntries as $value) {
-                    if (!is_array($value)) {
-                        continue;
+            foreach ($fileEntries as $value) {
+                if (!is_array($value)) {
+                    $valid = false;
+
+                    break;
+                }
+                $filePath = $value['name'] ?? $value['file'] ?? null;
+                if (!is_string($filePath) || $filePath === '') {
+                    $valid = false;
+
+                    break;
+                }
+                $files[] = $filePath;
+
+                $appliedFixers = $value['appliedFixers'] ?? [];
+                if (!is_array($appliedFixers)) {
+                    $valid = false;
+
+                    break;
+                }
+                foreach ($appliedFixers as $fixer) {
+                    if (!is_string($fixer) || $fixer === '') {
+                        $valid = false;
+
+                        break 2;
                     }
-                    $filePath = $value['name'] ?? $value['file'] ?? null;
-                    if (is_string($filePath)) {
-                        $files[] = $filePath;
-                    }
-                    $appliedFixers = $value['appliedFixers'] ?? [];
-                    if (is_array($appliedFixers)) {
-                        foreach ($appliedFixers as $fixer) {
-                            if (!is_string($fixer) || $fixer === '') {
-                                continue;
-                            }
-                            $ruleCounts[$fixer] = ($ruleCounts[$fixer] ?? 0) + 1;
-                        }
-                    }
+                    $ruleCounts[$fixer] = ($ruleCounts[$fixer] ?? 0) + 1;
                 }
             }
         }

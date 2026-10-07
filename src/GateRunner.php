@@ -88,11 +88,7 @@ class GateRunner
             } catch (Throwable $exception) {
                 $gateResult = $this->errorResult($gateDef['name'], $exception);
             }
-            $gateResult = $this->decorateResult(
-                $gateResult,
-                (int) (hrtime(true) - $startedAt),
-                $gateDef['gate'],
-            );
+            $gateResult = $this->decorateResult($gateResult, (int) (hrtime(true) - $startedAt), $gateDef['gate']);
             $gateResult = (new GatePolicyEvaluator())->evaluate($gateResult, $this->baseline);
 
             $results[] = $gateResult;
@@ -136,10 +132,7 @@ class GateRunner
                     $result = $gate->run($baseline, $resolver);
 
                     return $result
-                        ->withExecutionMetadata(
-                            (int) (hrtime(true) - $startedAt),
-                            self::executedTools($gate, $result),
-                        )
+                        ->withExecutionMetadata((int) (hrtime(true) - $startedAt), self::executedTools($gate, $result))
                         ->toArray();
                 } catch (Throwable $exception) {
                     return self::errorData($gateName, $exception);

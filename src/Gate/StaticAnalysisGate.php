@@ -92,15 +92,24 @@ readonly class StaticAnalysisGate implements GateInterface
         try {
             $data = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
-            throw new RuntimeException(sprintf(
-                'PHPStan returned invalid JSON (exit code %s): %s. Raw output: %s',
-                $process->getExitCode() ?? 'unknown',
-                $exception->getMessage(),
-                trim($output),
-            ), previous: $exception);
+            throw new RuntimeException(
+                sprintf(
+                    'PHPStan returned invalid JSON (exit code %s): %s. Raw output: %s',
+                    $process->getExitCode() ?? 'unknown',
+                    $exception->getMessage(),
+                    trim($output),
+                ),
+                previous: $exception,
+            );
         }
 
-        if (!is_array($data) || !is_array($data['totals'] ?? null)) {
+        if (
+            !is_array($data)
+            || !is_array($data['totals'] ?? null)
+            || !is_int($data['totals']['errors'] ?? null)
+            || !is_int($data['totals']['file_errors'] ?? null)
+            || !is_array($data['files'] ?? null)
+        ) {
             throw new RuntimeException(sprintf(
                 'PHPStan returned an invalid result (exit code %s). Raw output: %s',
                 $process->getExitCode() ?? 'unknown',
@@ -110,10 +119,7 @@ readonly class StaticAnalysisGate implements GateInterface
 
         $exitCode = $process->getExitCode();
         if ($exitCode !== 0 && $exitCode !== 1) {
-            throw new RuntimeException(sprintf(
-                'PHPStan failed with exit code %s.',
-                $exitCode ?? 'unknown',
-            ));
+            throw new RuntimeException(sprintf('PHPStan failed with exit code %s.', $exitCode ?? 'unknown'));
         }
 
         /** @var array<int, array<string, mixed>> $errors */
@@ -167,7 +173,7 @@ readonly class StaticAnalysisGate implements GateInterface
             $files[] = '[global]:0';
         }
 
-        $errorCount = $totals['file_errors'] + $totals['errors'] + count($globalErrors);
+        $errorCount = $totals['file_errors'] + max($totals['errors'], count($globalErrors));
 
         return $this->buildResult($errorCount, $errors, $files, $baseline, 'PHPStan');
     }

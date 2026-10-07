@@ -8,11 +8,11 @@ use B7S\Catraca\Enum\ActionType;
 use B7S\Catraca\Enum\Severity;
 use B7S\Catraca\Enum\Status;
 
+use function array_unique;
+use function array_values;
 use function is_array;
 use function is_int;
 use function is_string;
-use function array_unique;
-use function array_values;
 use function round;
 
 readonly class GateResult

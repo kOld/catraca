@@ -18,8 +18,8 @@ use function array_slice;
 use function count;
 use function is_int;
 use function sprintf;
-use function strlen;
 use function str_contains;
+use function strlen;
 
 class DuplicationGate implements GateInterface
 {
@@ -68,15 +68,17 @@ class DuplicationGate implements GateInterface
 
         $output = $process->getOutput() . $process->getErrorOutput();
 
-        if ($process->getExitCode() !== 0 && !str_contains($output, 'duplicated lines')) {
+        $validReport =
+            preg_match('/([\d.]+)%\s+duplicated lines/', $output) === 1
+            || str_contains($output, 'No code clones found.');
+        if (!$validReport || !in_array($process->getExitCode(), [0, 1], true)) {
             return new GateResult(
                 status: Status::Fail,
                 name: 'duplication',
                 label: 'Duplication',
-                message: sprintf(
-                    'PHPCPD failed with exit code %s.',
-                    $process->getExitCode() ?? 'unknown',
-                ),
+                message: $validReport
+                    ? sprintf('PHPCPD failed with exit code %s.', $process->getExitCode() ?? 'unknown')
+                    : 'PHPCPD returned an invalid duplication report.',
                 severity: Severity::Block,
                 baseline: ['percentage' => $this->getBaselineDup($baseline)],
                 current: null,

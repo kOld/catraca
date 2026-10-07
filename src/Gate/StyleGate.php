@@ -75,10 +75,12 @@ readonly class StyleGate implements GateInterface
         if (!is_dir($cacheDir)) {
             mkdir($cacheDir, 0755, true);
         }
-        $process = new Process(
-            [$resolver->resolvePhp(), $pint, '--test', '--cache-file=' . $cacheFile],
-            timeout: $baseline->getGateTimeout('style'),
-        );
+        $process = new Process([
+            $resolver->resolvePhp(),
+            $pint,
+            '--test',
+            '--cache-file=' . $cacheFile,
+        ], timeout: $baseline->getGateTimeout('style'));
         $process->run();
 
         $output = $process->getOutput();

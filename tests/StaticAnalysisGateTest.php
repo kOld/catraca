@@ -62,6 +62,18 @@ final class StaticAnalysisGateTest extends TestCase
                 ]);
                 exit(1);
             }
+            if ($mode === 'malformed-totals') {
+                echo json_encode(['totals' => [], 'files' => []]);
+                exit(0);
+            }
+            if ($mode === 'counted-global-errors') {
+                echo json_encode([
+                    'totals' => ['errors' => 1, 'file_errors' => 0],
+                    'files' => [],
+                    'errors' => ['A global error already included in totals'],
+                ]);
+                exit(1);
+            }
 
             echo json_encode([
                 'totals' => ['errors' => 0, 'file_errors' => 0],
@@ -139,6 +151,26 @@ final class StaticAnalysisGateTest extends TestCase
         $this->expectExceptionMessage('invalid JSON');
 
         (new StaticAnalysisGate())->run($baseline, new ToolResolver($this->tmpDir));
+    }
+
+    public function test_missing_phpstan_totals_cannot_be_reported_as_zero_errors(): void
+    {
+        file_put_contents($this->tmpDir . '/phpstan-mode', 'malformed-totals');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('invalid result');
+
+        (new StaticAnalysisGate())->run($this->createBaseline('4G'), new ToolResolver($this->tmpDir));
+    }
+
+    public function test_phpstan_global_errors_are_not_counted_twice(): void
+    {
+        file_put_contents($this->tmpDir . '/phpstan-mode', 'counted-global-errors');
+
+        $result = (new StaticAnalysisGate())->run($this->createBaseline('4G'), new ToolResolver($this->tmpDir));
+
+        self::assertSame(['errors' => 1], $result->current);
+        self::assertSame('A global error already included in totals', $result->details['errors'][0]['message']);
     }
 
     public function test_invalid_phpstan_memory_limit_is_rejected(): void
