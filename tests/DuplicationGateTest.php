@@ -31,6 +31,12 @@ final class DuplicationGateTest extends TestCase
         mkdir($this->tmpDir . '/vendor/bin', 0755, true);
         mkdir($this->tmpDir . '/src', 0755, true);
         file_put_contents($this->tmpDir . '/src/Sample.php', "<?php\n");
+        foreach (['First.php', 'Second.php', 'Third.php', 'Fourth.php'] as $file) {
+            file_put_contents(
+                $this->tmpDir . '/src/' . $file,
+                "<?php\nfunction duplicated(): array\n{\n    return ['one', 'two'];\n}\n",
+            );
+        }
         file_put_contents($this->tmpDir . '/duplication-mode', 'clean');
         file_put_contents($this->tmpDir . '/vendor/bin/phpcpd', <<<'PHP'
             #!/usr/bin/env php
@@ -45,6 +51,15 @@ final class DuplicationGateTest extends TestCase
                 echo 'The report format changed';
                 exit(0);
             }
+            if (trim((string) file_get_contents($root . '/duplication-mode')) === 'clones') {
+                echo "Found 3 code clones with 12 duplicated lines in 4 files:\n\n";
+                echo "  - {$root}/src/First.php:1-4 (4 lines)\n";
+                echo "    {$root}/src/Second.php:10-13\n\n";
+                echo "  - {$root}/src/Third.php:20-23 (4 lines)\n";
+                echo "    {$root}/src/Fourth.php:30-33\n\n";
+                echo "12.34% duplicated lines out of 100 total lines of code.\n";
+                exit(1);
+            }
             echo "No code clones found.\n";
             PHP);
         chmod($this->tmpDir . '/vendor/bin/phpcpd', 0755);
@@ -52,10 +67,17 @@ final class DuplicationGateTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (
-            ['catraca_baseline.json', 'duplication-mode', 'duplication-memory.log', 'vendor/bin/phpcpd', 'src/Sample.php']
-            as $path
-        ) {
+        foreach ([
+            'catraca_baseline.json',
+            'duplication-mode',
+            'duplication-memory.log',
+            'vendor/bin/phpcpd',
+            'src/Sample.php',
+            'src/First.php',
+            'src/Second.php',
+            'src/Third.php',
+            'src/Fourth.php',
+        ] as $path) {
             $absolutePath = $this->tmpDir . '/' . $path;
             if (file_exists($absolutePath)) {
                 unlink($absolutePath);
@@ -96,6 +118,19 @@ final class DuplicationGateTest extends TestCase
         self::assertSame(Status::Fail, $result->status);
         self::assertNull($result->current);
         self::assertSame('The report format changed', $result->details['stdout']);
+    }
+
+    public function test_summary_clone_count_is_used_while_pair_samples_remain_details(): void
+    {
+        file_put_contents($this->tmpDir . '/duplication-mode', 'clones');
+
+        $result = $this->runGate();
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertSame(['percentage' => 12.34, 'clones' => 3], $result->current);
+        self::assertCount(2, $result->details['clones']);
+        self::assertStringEndsWith('src/First.php:1-4', $result->details['clones'][0]['file_a']);
+        self::assertStringEndsWith('src/Second.php:10-13', $result->details['clones'][0]['file_b']);
     }
 
     private function runGate(): GateResult

@@ -17,6 +17,7 @@ use Symfony\Component\Process\Process;
 use function array_slice;
 use function count;
 use function is_int;
+use function preg_match;
 use function sprintf;
 use function str_contains;
 use function strlen;
@@ -129,6 +130,9 @@ class DuplicationGate implements GateInterface
         }
 
         $cloneCount = count($clones);
+        if (preg_match('/Found\s+(\d+)\s+code clones?\b/i', $output, $summaryMatch) === 1) {
+            $cloneCount = (int) $summaryMatch[1];
+        }
         $baselineDup = $this->getBaselineDup($baseline);
 
         $status = Status::Pass;
