@@ -111,11 +111,19 @@ class GateRunner
 
         $profile = $this->baseline->getProfile();
         $changedFrom = $this->baseline->getChangedFrom();
+        $timeoutOverride = $this->baseline->getTimeoutOverride();
         foreach ($this->gates as $gateDef) {
             $gateName = $gateDef['name'];
             $gateClass = $gateDef['gate']::class;
 
-            $closures[] = static function () use ($projectRoot, $gateName, $gateClass, $profile, $changedFrom): array {
+            $closures[] = static function () use (
+                $projectRoot,
+                $gateName,
+                $gateClass,
+                $profile,
+                $changedFrom,
+                $timeoutOverride,
+            ): array {
                 try {
                     // The gate is already a worker, so child gates must not
                     // recursively create another worker pool.
@@ -124,6 +132,7 @@ class GateRunner
                         parallelOverride: false,
                         profile: $profile,
                         changedFrom: $changedFrom,
+                        timeoutOverride: $timeoutOverride,
                     );
                     $resolver = new ToolResolver($projectRoot);
                     $gate = new $gateClass();

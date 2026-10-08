@@ -69,6 +69,24 @@ final class GateRunnerTest extends TestCase
 
         self::assertSame([], $runner->run());
     }
+
+    public function test_parallel_workers_preserve_the_baseline_timeout_override(): void
+    {
+        if (!ForkExecutor::isAvailable()) {
+            self::markTestSkipped('pcntl is not available');
+        }
+
+        $baseline = new Baseline($this->tmpDir, timeoutOverride: 7);
+        $baseline->init();
+        $runner = new GateRunner($baseline, new ToolResolver($this->tmpDir), [[
+            'gate' => new TimeoutGate(),
+            'name' => 'Timeout',
+        ]]);
+
+        $results = $runner->run();
+
+        self::assertSame(['timeout' => 7], $results[0]->current);
+    }
 }
 
 final class ParallelStateGate implements GateInterface
@@ -81,6 +99,20 @@ final class ParallelStateGate implements GateInterface
             label: 'Parallel state',
             message: 'Parallel state captured',
             current: ['parallel_enabled' => $baseline->isParallelEnabled()],
+        );
+    }
+}
+
+final class TimeoutGate implements GateInterface
+{
+    public function run(Baseline $baseline, ToolResolver $resolver): GateResult
+    {
+        return new GateResult(
+            status: Status::Pass,
+            name: 'timeout',
+            label: 'Timeout',
+            message: 'Timeout captured',
+            current: ['timeout' => $baseline->getGateTimeout('coverage')],
         );
     }
 }

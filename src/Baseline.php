@@ -176,6 +176,11 @@ class Baseline
         return $this->changedFrom;
     }
 
+    public function getTimeoutOverride(): ?int
+    {
+        return $this->timeoutOverride;
+    }
+
     public function getPolicy(string $key, mixed $default = null): mixed
     {
         return $this->getConfig('policy', $key, $default);
