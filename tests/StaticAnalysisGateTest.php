@@ -80,7 +80,26 @@ final class StaticAnalysisGateTest extends TestCase
                 'files' => [],
             ]);
             PHP);
+        file_put_contents($this->tmpDir . '/psalm-mode', 'pass');
+        file_put_contents($this->tmpDir . '/vendor/bin/psalm', <<<'PHP'
+            #!/usr/bin/env php
+
+            <?php
+
+            $root = dirname(__DIR__, 2);
+            $mode = trim((string) file_get_contents($root . '/psalm-mode'));
+            if ($mode === 'fail') {
+                fwrite(STDERR, 'Psalm worker crashed');
+                exit(7);
+            }
+            if ($mode === 'malformed') {
+                echo 'not-json';
+                exit(0);
+            }
+            echo json_encode([]);
+            PHP);
         chmod($this->tmpDir . '/vendor/bin/phpstan', 0755);
+        chmod($this->tmpDir . '/vendor/bin/psalm', 0755);
     }
 
     protected function tearDown(): void
@@ -91,6 +110,8 @@ final class StaticAnalysisGateTest extends TestCase
             '/phpstan-mode',
             '/phpstan-calls.log',
             '/vendor/bin/phpstan',
+            '/psalm-mode',
+            '/vendor/bin/psalm',
         ] as $path) {
             $absolutePath = $this->tmpDir . $path;
             if (is_file($absolutePath)) {
@@ -109,7 +130,10 @@ final class StaticAnalysisGateTest extends TestCase
         $result = (new StaticAnalysisGate())->run($baseline, new ToolResolver($this->tmpDir));
 
         self::assertSame(Status::Pass, $result->status);
-        self::assertStringContainsString('--memory-limit=4G', (string) file_get_contents($this->tmpDir . '/phpstan-calls.log'));
+        self::assertStringContainsString(
+            '--memory-limit=4G',
+            (string) file_get_contents($this->tmpDir . '/phpstan-calls.log'),
+        );
     }
 
     public function test_phpstan_error_exit_code_is_parsed_as_a_quality_failure(): void
@@ -131,14 +155,8 @@ final class StaticAnalysisGateTest extends TestCase
 
         self::assertSame(Status::Fail, $result->status);
         self::assertSame(['errors' => 1], $result->current);
-        self::assertSame(
-            'PHPStan worker crashed while loading the project',
-            $result->details['errors'][0]['message'],
-        );
-        self::assertSame(
-            'PHPStan worker crashed while loading the project',
-            $result->details['errors'][0]['raw'],
-        );
+        self::assertSame('PHPStan worker crashed while loading the project', $result->details['errors'][0]['message']);
+        self::assertSame('PHPStan worker crashed while loading the project', $result->details['errors'][0]['raw']);
         self::assertSame('[global]', $result->details['errors'][0]['file']);
     }
 
@@ -193,6 +211,26 @@ final class StaticAnalysisGateTest extends TestCase
         (new StaticAnalysisGate())->run($baseline, new ToolResolver($this->tmpDir));
     }
 
+    public function test_psalm_nonzero_exit_cannot_be_reported_as_zero_errors(): void
+    {
+        file_put_contents($this->tmpDir . '/psalm-mode', 'fail');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Psalm failed with exit code 7');
+
+        (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
+    }
+
+    public function test_psalm_malformed_output_cannot_be_reported_as_zero_errors(): void
+    {
+        file_put_contents($this->tmpDir . '/psalm-mode', 'malformed');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Psalm returned invalid JSON');
+
+        (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
+    }
+
     private function createBaseline(mixed $memoryLimit): Baseline
     {
         $baseline = new Baseline($this->tmpDir);
@@ -203,6 +241,19 @@ final class StaticAnalysisGateTest extends TestCase
                         'phpstan' => ['memory_limit' => $memoryLimit],
                     ],
                 ],
+            ],
+            'results' => ['static_analysis' => ['errors' => 0]],
+        ]);
+
+        return $baseline;
+    }
+
+    private function createPsalmBaseline(): Baseline
+    {
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'tools' => ['analyze' => 'psalm'],
             ],
             'results' => ['static_analysis' => ['errors' => 0]],
         ]);

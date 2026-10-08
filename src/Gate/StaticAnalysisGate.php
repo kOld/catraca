@@ -192,6 +192,22 @@ readonly class StaticAnalysisGate implements GateInterface
         /** @var mixed $data */
         $data = json_decode($output, true);
 
+        if ($process->getExitCode() !== 0 && $process->getExitCode() !== 1) {
+            throw new RuntimeException(sprintf(
+                'Psalm failed with exit code %s. Raw output: %s',
+                $process->getExitCode() ?? 'unknown',
+                trim($output),
+            ));
+        }
+
+        if (!is_array($data)) {
+            throw new RuntimeException(sprintf(
+                'Psalm returned invalid JSON (exit code %s). Raw output: %s',
+                $process->getExitCode() ?? 'unknown',
+                trim($output),
+            ));
+        }
+
         /** @var array<int, array{file: string, line: int, message: string, severity: string}> $errors */
         $errors = [];
         /** @var array<int, string> $files */
