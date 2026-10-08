@@ -4,15 +4,10 @@ declare(strict_types=1);
 
 namespace B7S\Catraca\Gate;
 
-use RuntimeException;
-
-use function array_merge;
 use function chmod;
 use function count;
 use function file_put_contents;
-use function is_array;
 use function is_file;
-use function json_decode;
 use function sys_get_temp_dir;
 use function tempnam;
 use function unlink;
@@ -23,7 +18,7 @@ use function var_export;
  *
  * PHP CS Fixer requires an explicit config when more than one path is passed.
  * Existing project configs remain authoritative; otherwise a short-lived
- * Finder config scopes one invocation to the resolved absolute paths.
+ * empty config enables native path resolution for one invocation.
  */
 final class PhpCsFixerPathConfig
 {
@@ -41,53 +36,53 @@ final class PhpCsFixerPathConfig
     public static function prepare(string $projectRoot, array $paths, ?string $rulesJson = null): self
     {
         $existingConfig = self::findProjectConfig($projectRoot);
-        if ($rulesJson === null && count($paths) <= 1) {
-            return new self($paths, null);
+        $temporaryConfig = null;
+        $arguments = [];
+
+        if ($existingConfig !== null && $rulesJson !== null) {
+            $temporaryConfig = self::createConfigWithRules($existingConfig, $rulesJson);
+            $arguments[] = '--config=' . $temporaryConfig;
+        } elseif ($existingConfig !== null) {
+            $arguments[] = '--config=' . $existingConfig;
+        } elseif (count($paths) > 1) {
+            $temporaryConfig = self::createConfigWithRules(null, null);
+            $arguments[] = '--config=' . $temporaryConfig;
         }
 
-        if ($rulesJson === null && $existingConfig !== null) {
-            return new self(array_merge(['--config=' . $existingConfig], $paths), null);
+        if ($rulesJson !== null && $temporaryConfig === null) {
+            $arguments[] = '--rules=' . $rulesJson;
         }
 
-        if ($rulesJson !== null && $existingConfig === null && count($paths) <= 1) {
-            return new self(array_merge($paths, ['--rules=' . $rulesJson]), null);
-        }
+        return new self([...$arguments, ...$paths], $temporaryConfig);
+    }
 
-        $rules = null;
-        if ($rulesJson !== null) {
-            $rules = json_decode($rulesJson, true, 512, JSON_THROW_ON_ERROR);
-            if (!is_array($rules)) {
-                throw new RuntimeException('PHP CS Fixer rules must decode to an array.');
-            }
-        }
-
+    private static function createConfigWithRules(?string $existingConfig, ?string $rulesJson): string
+    {
         $temporaryConfig = tempnam(sys_get_temp_dir(), 'catraca-php-cs-fixer-');
         if ($temporaryConfig === false) {
-            throw new RuntimeException('Unable to create a temporary PHP CS Fixer configuration.');
+            throw new \RuntimeException('Unable to create a temporary PHP CS Fixer configuration.');
         }
 
-        $baseConfig = $existingConfig === null
-            ? 'new \\PhpCsFixer\\Config()'
-            : 'require ' . var_export($existingConfig, true);
-        $config =
-            "<?php\n\n\$baseConfig = {$baseConfig};\nreturn \$baseConfig\n"
-            . "    ->setFinder(\\PhpCsFixer\\Finder::create()->in("
-            . var_export($paths, true)
-            . '))';
-        if ($rules !== null) {
-            $config .= "\n    ->setRules(" . var_export($rules, true) . ')';
+        $config = $existingConfig === null
+            ? '$config = new \\PhpCsFixer\\Config();'
+            : '$config = require ' . var_export($existingConfig, true) . ';';
+        if ($rulesJson !== null) {
+            $config .=
+                "\n\$config = \$config->setRules(json_decode("
+                . var_export($rulesJson, true)
+                . ', true, 512, JSON_THROW_ON_ERROR));';
         }
-        $config .= ";\n";
+        $config = "<?php\n\n{$config}\nreturn \$config;\n";
 
         if (file_put_contents($temporaryConfig, $config, LOCK_EX) === false) {
             @unlink($temporaryConfig);
 
-            throw new RuntimeException('Unable to write a temporary PHP CS Fixer configuration.');
+            throw new \RuntimeException('Unable to write a temporary PHP CS Fixer configuration.');
         }
 
         chmod($temporaryConfig, 0600);
 
-        return new self(['--config=' . $temporaryConfig], $temporaryConfig);
+        return $temporaryConfig;
     }
 
     private static function findProjectConfig(string $projectRoot): ?string

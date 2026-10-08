@@ -51,7 +51,13 @@ final class StyleGateTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['catraca_baseline.json', 'src/Sample.php', 'vendor/bin/pint', 'vendor/bin/php-cs-fixer'] as $path) {
+        foreach ([
+            'catraca_baseline.json',
+            '.php-cs-fixer.php',
+            'src/Sample.php',
+            'vendor/bin/pint',
+            'vendor/bin/php-cs-fixer',
+        ] as $path) {
             $absolutePath = $this->tmpDir . '/' . $path;
             if (file_exists($absolutePath)) {
                 unlink($absolutePath);
@@ -118,6 +124,55 @@ final class StyleGateTest extends TestCase
 
         self::assertSame(Status::Pass, $result->status);
         self::assertSame(['violations' => 0], $result->current);
+    }
+
+    public function test_native_php_cs_fixer_accepts_a_source_file_and_directory(): void
+    {
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src/Sample.php', 'src/second']],
+                'tools' => ['format' => 'php-cs-fixer'],
+            ],
+            'results' => [],
+        ]);
+
+        $result = (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+    }
+
+    public function test_native_php_cs_fixer_uses_an_existing_relative_config_from_the_project_root(): void
+    {
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/Sample.php', "<?php\n\$value = \"value\";\n");
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n\$other = \"value\";\n");
+        file_put_contents($this->tmpDir . '/.php-cs-fixer.php', <<<'PHP'
+            <?php
+            return (new PhpCsFixer\Config())
+                ->setRules(['single_quote' => true])
+                ->setFinder(PhpCsFixer\Finder::create()->in('src'));
+            PHP);
+        $this->writeNativeFixerProxy();
+
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src/Sample.php', 'src/second']],
+                'tools' => ['format' => 'php-cs-fixer'],
+            ],
+            'results' => [],
+        ]);
+
+        $result = (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertGreaterThan(0, $result->current['violations']);
     }
 
     /** @return array<string, array{tool: string, mode: string}> */

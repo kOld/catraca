@@ -156,7 +156,7 @@ readonly class StyleGate implements GateInterface
                 '--format=json',
                 ...$pathConfig->arguments(),
             ];
-            $process = new Process($cmd, timeout: $baseline->getGateTimeout('style'));
+            $process = new Process($cmd, $resolver->getProjectRoot(), timeout: $baseline->getGateTimeout('style'));
             $process->run();
 
             $result = CsFixerResultParser::parseJsonOutput($process->getOutput());

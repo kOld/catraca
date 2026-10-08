@@ -430,7 +430,7 @@ readonly class PerformanceGate implements GateInterface
             ];
 
             /** @var array<int, string> $cmd */
-            $process = new Process($cmd, timeout: $timeout);
+            $process = new Process($cmd, $resolver->getProjectRoot(), timeout: $timeout);
             $process->run();
             $stdout = $process->getOutput();
             $stderr = $process->getErrorOutput();

@@ -102,6 +102,7 @@ final class PerformanceGateTest extends TestCase
     {
         foreach ([
             'catraca_baseline.json',
+            '.php-cs-fixer.php',
             'performance-mode',
             'vendor/bin/php-cs-fixer',
             'src/Sample.php',
@@ -247,6 +248,52 @@ final class PerformanceGateTest extends TestCase
 
         self::assertSame(Status::Pass, $result->status);
         self::assertSame(['violations' => 0], $result->current);
+    }
+
+    public function test_native_php_cs_fixer_accepts_a_source_file_and_directory(): void
+    {
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+        file_put_contents($this->tmpDir . '/performance-mode', 'clean');
+
+        $baseline = $this->baseline(
+            [],
+            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
+            sourcePaths: ['src/Sample.php', 'src/second'],
+        );
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+        self::assertFileExists($this->tmpDir . '/.catraca-cache/performance-php-cs-fixer.cache');
+    }
+
+    public function test_native_php_cs_fixer_preserves_relative_config_and_performance_rules(): void
+    {
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        file_put_contents($this->tmpDir . '/.php-cs-fixer.php', <<<'PHP'
+            <?php
+            return (new PhpCsFixer\Config())
+                ->setRules(['single_quote' => true])
+                ->setFinder(PhpCsFixer\Finder::create()->in('src'));
+            PHP);
+        $this->writeNativeFixerProxy();
+        file_put_contents($this->tmpDir . '/performance-mode', 'clean');
+
+        $baseline = $this->baseline(
+            [],
+            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
+            sourcePaths: ['src/Sample.php', 'src/second'],
+        );
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+        self::assertFileExists($this->tmpDir . '/.catraca-cache/performance-php-cs-fixer.cache');
     }
 
     public function test_auto_chooses_php_cs_fixer_when_mago_cannot_cover_configured_rules(): void
