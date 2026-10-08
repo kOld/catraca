@@ -18,6 +18,7 @@ use JsonException;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 
+use function array_is_list;
 use function array_slice;
 use function array_values;
 use function count;
@@ -25,7 +26,9 @@ use function is_array;
 use function is_int;
 use function is_string;
 use function json_decode;
+use function ltrim;
 use function sprintf;
+use function str_starts_with;
 
 use const JSON_THROW_ON_ERROR;
 
@@ -186,6 +189,7 @@ readonly class StaticAnalysisGate implements GateInterface
             '--output-format=json',
             '--no-progress',
         ], timeout: $baseline->getGateTimeout('static_analysis'));
+        $process->setWorkingDirectory($baseline->projectRoot);
         $process->run();
 
         $output = $process->getOutput() !== '' ? $process->getOutput() : $process->getErrorOutput();
@@ -208,28 +212,38 @@ readonly class StaticAnalysisGate implements GateInterface
             ));
         }
 
+        if (
+            !str_starts_with(ltrim($output), '[')
+            || !array_is_list($data)
+            || $process->getExitCode() === 2 && $data === []
+        ) {
+            throw new RuntimeException('Psalm returned an invalid result: expected a list of reported issues.');
+        }
+
         /** @var array<int, array{file: string, line: int, message: string, severity: string}> $errors */
         $errors = [];
         /** @var array<int, string> $files */
         $files = [];
 
-        if (is_array($data)) {
-            foreach ($data as $issue) {
-                if (!is_array($issue)) {
-                    continue;
-                }
-                $filePath = $issue['file_path'] ?? null;
-                if (is_string($filePath)) {
-                    $line = is_int($issue['line_from'] ?? null) ? $issue['line_from'] : 0;
-                    $errors[] = [
-                        'file' => $filePath,
-                        'line' => $line,
-                        'message' => is_string($issue['message'] ?? null) ? $issue['message'] : '',
-                        'severity' => is_string($issue['severity'] ?? null) ? $issue['severity'] : 'error',
-                    ];
-                    $files[] = $filePath . ':' . $line;
-                }
+        foreach ($data as $issue) {
+            if (
+                !is_array($issue)
+                || !is_string($issue['file_path'] ?? null)
+                || $issue['file_path'] === ''
+                || !is_int($issue['line_from'] ?? null)
+                || !is_string($issue['message'] ?? null)
+                || !is_string($issue['severity'] ?? null)
+            ) {
+                throw new RuntimeException('Psalm returned an invalid result: malformed issue entry.');
             }
+
+            $errors[] = [
+                'file' => $issue['file_path'],
+                'line' => $issue['line_from'],
+                'message' => $issue['message'],
+                'severity' => $issue['severity'],
+            ];
+            $files[] = $issue['file_path'] . ':' . $issue['line_from'];
         }
 
         return $this->buildResult(count($errors), $errors, $files, $baseline, 'Psalm');

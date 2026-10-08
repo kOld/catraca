@@ -9,6 +9,7 @@ use B7S\Catraca\Enum\Status;
 use B7S\Catraca\Gate\StaticAnalysisGate;
 use B7S\Catraca\ToolResolver;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -110,6 +111,22 @@ final class StaticAnalysisGateTest extends TestCase
             if ($mode === 'failed-run') {
                 fwrite(STDERR, 'Psalm could not complete');
                 exit(1);
+            }
+            if ($mode === 'object-report') {
+                echo '{"error":"analysis unavailable"}';
+                exit(0);
+            }
+            if ($mode === 'empty-object-report') {
+                echo '{}';
+                exit(0);
+            }
+            if ($mode === 'invalid-issue') {
+                echo '[{"message":"analysis unavailable"}]';
+                exit(2);
+            }
+            if ($mode === 'empty-issues-exit') {
+                echo '[]';
+                exit(2);
             }
             echo json_encode([]);
             PHP);
@@ -265,6 +282,28 @@ final class StaticAnalysisGateTest extends TestCase
         $this->expectExceptionMessage('Psalm failed with exit code 1');
 
         (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
+    }
+
+    #[DataProvider('invalidPsalmReports')]
+    public function test_invalid_psalm_report_contract_cannot_be_reported_as_zero_errors(string $mode): void
+    {
+        file_put_contents($this->tmpDir . '/psalm-mode', $mode);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Psalm returned an invalid result');
+
+        (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
+    }
+
+    /** @return array<string, array{string}> */
+    public static function invalidPsalmReports(): array
+    {
+        return [
+            'object instead of issue list' => ['object-report'],
+            'empty object instead of issue list' => ['empty-object-report'],
+            'issue without a source location' => ['invalid-issue'],
+            'issue exit without reported issues' => ['empty-issues-exit'],
+        ];
     }
 
     private function createBaseline(mixed $memoryLimit): Baseline
