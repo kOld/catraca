@@ -6,9 +6,11 @@ namespace B7S\Catraca\Tests;
 
 use B7S\Catraca\Gate\SecuritySubCheck;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 use function chmod;
 use function file_exists;
+use function file_get_contents;
 use function file_put_contents;
 use function implode;
 use function is_dir;
@@ -16,6 +18,7 @@ use function mkdir;
 use function rmdir;
 use function scandir;
 use function sys_get_temp_dir;
+use function tempnam;
 use function trim;
 use function uniqid;
 use function unlink;
@@ -469,10 +472,35 @@ final class SecuritySubCheckTest extends TestCase
             $this->markTestSkipped('gitleaks binary is not installed');
         }
 
-        $this->write('vendor/acme/package/Config.php', <<<'PHP'
-            <?php
-            return ['aws_key' => 'AKIAIOSFODNN7EXAMPLE'];
-            PHP);
+        $syntheticToken = 'ghp_' . '8f4J9x2M7pQ5vR3nT6kW1zC4hY9uB2dL7sQ5';
+        $this->write('vendor/acme/package/Config.php', "<?php\nreturn ['github_token' => '{$syntheticToken}'];\n");
+
+        $reportPath = tempnam(sys_get_temp_dir(), 'catraca-gitleaks-vendor-');
+        self::assertNotFalse($reportPath);
+        $process = new Process(
+            [
+                'gitleaks',
+                'detect',
+                '--no-git',
+                '--no-banner',
+                '--redact',
+                '--report-format',
+                'json',
+                '--report-path',
+                $reportPath,
+                '--source',
+                '.',
+            ],
+            $this->tmpDir,
+            timeout: 180,
+        );
+        $process->run();
+        $rawReport = file_get_contents($reportPath);
+        unlink($reportPath);
+
+        self::assertSame(1, $process->getExitCode());
+        self::assertIsString($rawReport);
+        self::assertStringContainsString('vendor/acme/package/Config.php', $rawReport);
 
         $sub = new SecuritySubCheck($this->tmpDir, [$this->tmpDir]);
 
@@ -631,6 +659,29 @@ final class SecuritySubCheckTest extends TestCase
                 shift
             done
             printf '%s\n' '[null]' > "$report"
+            SH);
+
+        $findings = (new SecuritySubCheck($this->tmpDir, [$this->tmpDir]))->checkGitleaks();
+
+        self::assertNotSame([], $findings);
+        self::assertStringContainsString('invalid report', $findings[0]);
+    }
+
+    public function test_gitleaks_fails_closed_before_filtering_malformed_excluded_report_entries(): void
+    {
+        $this->writeExecutable('vendor/bin/gitleaks', <<<'SH'
+            #!/bin/sh
+            report=''
+            while [ "$#" -gt 0 ]; do
+                if [ "$1" = "--report-path" ]; then
+                    report="$2"
+                    shift 2
+                    continue
+                fi
+                shift
+            done
+            printf '%s\n' '[{"File":"vendor/generated.php"}]' > "$report"
+            exit 0
             SH);
 
         $findings = (new SecuritySubCheck($this->tmpDir, [$this->tmpDir]))->checkGitleaks();

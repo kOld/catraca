@@ -12,6 +12,7 @@ use function file_get_contents;
 use function in_array;
 use function is_array;
 use function is_executable;
+use function is_int;
 use function is_string;
 use function json_decode;
 use function json_last_error;
@@ -129,6 +130,20 @@ final class GitleaksScanner
                 return [$this->failure('returned an invalid report', $exitCode)];
             }
 
+            $rule = $item['RuleID'] ?? null;
+            $line = $item['StartLine'] ?? null;
+            $description = $item['Description'] ?? null;
+            if (
+                !is_string($rule)
+                || trim($rule) === ''
+                || !is_int($line)
+                || $line < 1
+                || !is_string($description)
+                || trim($description) === ''
+            ) {
+                return [$this->failure('returned an invalid report', $exitCode)];
+            }
+
             // gitleaks may report absolute paths when --source is absolute;
             // normalize to relative so the exclude filter and output stay clean
             $rootPrefix = $this->root . '/';
@@ -139,9 +154,6 @@ final class GitleaksScanner
                 continue;
             }
 
-            $rule = (string) ($item['RuleID'] ?? 'unknown');
-            $line = (int) ($item['StartLine'] ?? 0);
-            $description = (string) ($item['Description'] ?? '');
             $findings[] = sprintf('[gitleaks:%s] %s:%d %s', $rule, $file, $line, $description);
         }
 
