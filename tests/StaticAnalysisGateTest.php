@@ -96,6 +96,21 @@ final class StaticAnalysisGateTest extends TestCase
                 echo 'not-json';
                 exit(0);
             }
+            if ($mode === 'issues') {
+                echo json_encode([
+                    [
+                        'file_path' => 'src/Sample.php',
+                        'line_from' => 12,
+                        'message' => 'Psalm found an issue',
+                        'severity' => 'error',
+                    ],
+                ]);
+                exit(2);
+            }
+            if ($mode === 'failed-run') {
+                fwrite(STDERR, 'Psalm could not complete');
+                exit(1);
+            }
             echo json_encode([]);
             PHP);
         chmod($this->tmpDir . '/vendor/bin/phpstan', 0755);
@@ -227,6 +242,27 @@ final class StaticAnalysisGateTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Psalm returned invalid JSON');
+
+        (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
+    }
+
+    public function test_psalm_completed_with_issues_is_parsed_as_a_quality_failure(): void
+    {
+        file_put_contents($this->tmpDir . '/psalm-mode', 'issues');
+
+        $result = (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertSame(['errors' => 1], $result->current);
+        self::assertSame('Psalm found an issue', $result->details['errors'][0]['message']);
+    }
+
+    public function test_psalm_failed_run_exit_code_cannot_be_reported_as_a_quality_result(): void
+    {
+        file_put_contents($this->tmpDir . '/psalm-mode', 'failed-run');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Psalm failed with exit code 1');
 
         (new StaticAnalysisGate())->run($this->createPsalmBaseline(), new ToolResolver($this->tmpDir));
     }

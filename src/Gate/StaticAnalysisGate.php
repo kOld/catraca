@@ -192,7 +192,7 @@ readonly class StaticAnalysisGate implements GateInterface
         /** @var mixed $data */
         $data = json_decode($output, true);
 
-        if ($process->getExitCode() !== 0 && $process->getExitCode() !== 1) {
+        if ($process->getExitCode() !== 0 && $process->getExitCode() !== 2) {
             throw new RuntimeException(sprintf(
                 'Psalm failed with exit code %s. Raw output: %s',
                 $process->getExitCode() ?? 'unknown',
