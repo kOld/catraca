@@ -246,6 +246,10 @@ final class DependencyAuditScanner
             }
         }
 
+        if ($exitCode === 1 && $vulnerabilities === []) {
+            return [$this->auditFailure('npm', $exitCode, 'reported no audit findings', '')];
+        }
+
         return $findings;
     }
 

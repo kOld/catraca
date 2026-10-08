@@ -229,6 +229,23 @@ final class DependencyAuditScannerTest extends TestCase
         self::assertStringContainsString('[high] lodash: Prototype pollution', $findings[0]);
     }
 
+    public function test_npm_audit_fails_closed_on_exit_one_without_vulnerability_findings(): void
+    {
+        $this->write('package.json', '{}');
+        $this->write('package-lock.json', '{}');
+        $npm = $this->writeExecutable('npm', <<<'SH'
+            #!/bin/sh
+            printf '%s\n' '{"vulnerabilities":{}}'
+            exit 1
+            SH);
+        $this->prependPath($npm);
+
+        $findings = (new DependencyAuditScanner($this->tmpDir))->checkNpmAudit();
+
+        self::assertNotSame([], $findings);
+        self::assertStringContainsString('reported no audit findings', $findings[0]);
+    }
+
     public function test_npm_audit_fails_closed_on_malformed_json(): void
     {
         $this->write('package.json', '{}');
