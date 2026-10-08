@@ -270,6 +270,37 @@ final class PerformanceGateTest extends TestCase
         self::assertFileExists($this->tmpDir . '/.catraca-cache/performance-php-cs-fixer.cache');
     }
 
+    public function test_native_php_cs_fixer_applies_performance_rules_to_every_source_directory(): void
+    {
+        mkdir($this->tmpDir . '/src/first', 0755, true);
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/first/Sample.php', <<<'PHP'
+            <?php
+            namespace Sample;
+
+            function makeDate(): \DateTimeImmutable
+            {
+                return new \DateTimeImmutable();
+            }
+            PHP);
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+        file_put_contents($this->tmpDir . '/performance-mode', 'clean');
+
+        $baseline = $this->baseline(
+            [],
+            ['global_namespace_import' => true, 'autoload_optimization' => false, 'condition_order' => false],
+            sourcePaths: ['src/first', 'src/second'],
+        );
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertSame(['violations' => 1], $result->current);
+        self::assertSame(['global_namespace_import' => 1], $result->details['rules']['counts']);
+        self::assertFileExists($this->tmpDir . '/.catraca-cache/performance-php-cs-fixer.cache');
+    }
+
     public function test_native_php_cs_fixer_preserves_relative_config_and_performance_rules(): void
     {
         mkdir($this->tmpDir . '/src/second', 0755, true);

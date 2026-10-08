@@ -45,7 +45,7 @@ final class PhpCsFixerPathConfig
         } elseif ($existingConfig !== null) {
             $arguments[] = '--config=' . $existingConfig;
         } elseif (count($paths) > 1) {
-            $temporaryConfig = self::createConfigWithRules(null, null);
+            $temporaryConfig = self::createConfigWithRules(null, $rulesJson);
             $arguments[] = '--config=' . $temporaryConfig;
         }
 
