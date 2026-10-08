@@ -19,6 +19,7 @@ use function array_slice;
 use function count;
 use function file_exists;
 use function file_get_contents;
+use function implode;
 use function is_array;
 use function is_int;
 use function is_numeric;
@@ -58,7 +59,7 @@ class ComplexityGate implements GateInterface
             'memory_limit=1G',
             $phpmetrics,
             '--report-json=' . $jsonPath,
-            ...(new SourcePathResolver())->resolveForBaseline($baseline),
+            implode(',', (new SourcePathResolver())->resolveForBaseline($baseline)),
         ], timeout: $baseline->getGateTimeout('complexity'));
         $process->run();
 

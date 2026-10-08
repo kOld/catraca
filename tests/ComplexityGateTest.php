@@ -21,6 +21,7 @@ use function rmdir;
 use function sys_get_temp_dir;
 use function uniqid;
 use function unlink;
+use function var_export;
 
 final class ComplexityGateTest extends TestCase
 {
@@ -31,6 +32,7 @@ final class ComplexityGateTest extends TestCase
         $this->tmpDir = sys_get_temp_dir() . '/catraca-complexity-test-' . uniqid('', true);
         mkdir($this->tmpDir . '/vendor/bin', 0755, true);
         mkdir($this->tmpDir . '/src', 0755, true);
+        mkdir($this->tmpDir . '/secondary', 0755, true);
         file_put_contents($this->tmpDir . '/src/Sample.php', "<?php\n");
         file_put_contents($this->tmpDir . '/metrics-mode', 'flat');
         file_put_contents($this->tmpDir . '/vendor/bin/phpmetrics', <<<'PHP'
@@ -63,13 +65,21 @@ final class ComplexityGateTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['catraca_baseline.json', 'metrics-mode', 'metrics-memory.log', 'vendor/bin/phpmetrics', 'src/Sample.php'] as $path) {
+        foreach ([
+            'catraca_baseline.json',
+            'metrics-mode',
+            'metrics-memory.log',
+            'vendor/bin/phpmetrics',
+            'src/Sample.php',
+            'secondary/Simple.php',
+        ] as $path) {
             $absolutePath = $this->tmpDir . '/' . $path;
             if (file_exists($absolutePath)) {
                 unlink($absolutePath);
             }
         }
         rmdir($this->tmpDir . '/src');
+        rmdir($this->tmpDir . '/secondary');
         rmdir($this->tmpDir . '/vendor/bin');
         rmdir($this->tmpDir . '/vendor');
         rmdir($this->tmpDir);
@@ -124,6 +134,46 @@ final class ComplexityGateTest extends TestCase
 
         self::assertSame(Status::Pass, $result->status);
         self::assertSame(0, $result->current['max_ccn']);
+    }
+
+    public function test_native_phpmetrics_analyzes_every_source_root(): void
+    {
+        file_put_contents(
+            $this->tmpDir . '/vendor/bin/phpmetrics',
+            '<?php require ' . var_export(__DIR__ . '/../vendor/bin/phpmetrics', true) . ';',
+        );
+        file_put_contents($this->tmpDir . '/src/Sample.php', <<<'PHP'
+            <?php
+            namespace FirstSource;
+            final class Branching
+            {
+                public function calculate(int $number): int
+                {
+                    if ($number > 0) { $number++; }
+                    if ($number > 1) { $number++; }
+                    if ($number > 2) { $number++; }
+                    return $number;
+                }
+            }
+            PHP);
+        file_put_contents($this->tmpDir . '/secondary/Simple.php', <<<'PHP'
+            <?php
+            namespace SecondSource;
+            final class Simple
+            {
+                public function calculate(): int { return 1; }
+            }
+            PHP);
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => ['source_dirs' => ['paths' => ['src', 'secondary']]],
+            'results' => ['complexity' => ['max_ccn' => 10]],
+        ]);
+
+        $result = (new ComplexityGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(4, $result->current['max_ccn']);
     }
 
     /** @param array<string, int> $complexityConfig */
