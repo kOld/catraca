@@ -6,14 +6,18 @@ namespace B7S\Catraca\Tests;
 
 use B7S\Catraca\Baseline;
 use B7S\Catraca\Catraca;
+use B7S\Catraca\Enum\Status;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
 use function file_exists;
 use function file_get_contents;
+use function file_put_contents;
+use function is_dir;
 use function json_decode;
 use function mkdir;
 use function rmdir;
+use function str_repeat;
 use function sys_get_temp_dir;
 use function uniqid;
 use function unlink;
@@ -35,6 +39,12 @@ final class CatracaTest extends TestCase
         if (file_exists($this->tmpDir . '/catraca_baseline.json')) {
             unlink($this->tmpDir . '/catraca_baseline.json');
         }
+        if (file_exists($this->tmpDir . '/src/Large.php')) {
+            unlink($this->tmpDir . '/src/Large.php');
+        }
+        if (is_dir($this->tmpDir . '/src')) {
+            rmdir($this->tmpDir . '/src');
+        }
         rmdir($this->tmpDir);
     }
 
@@ -54,6 +64,24 @@ final class CatracaTest extends TestCase
         self::assertCount(1, $result['gates']);
         self::assertArrayHasKey('elapsed_ms', $result['gates'][0]);
         self::assertArrayHasKey('executed_tools', $result['gates'][0]);
+        self::assertTrue(file_exists($this->tmpDir . '/catraca_baseline.json'));
+    }
+
+    public function test_check_preserves_existing_baseline_bytes_while_running_the_gate(): void
+    {
+        mkdir($this->tmpDir . '/src', 0755, true);
+        file_put_contents($this->tmpDir . '/src/Large.php', str_repeat("line\n", 1001));
+
+        $rawBaseline = '{"schema":"catraca/v2","config":{"source_dirs":{"paths":["src"],"exclude":[]}},"results":{"file_size":{"over_limit":0}},"updated_at":"2026-01-01T00:00:00+00:00"}';
+        file_put_contents($this->tmpDir . '/catraca_baseline.json', $rawBaseline);
+
+        $result = (new Catraca($this->tmpDir, selectedGates: ['file_size'], sequential: true))->check();
+
+        self::assertFalse($result->isPass());
+        self::assertSame(Status::Fail, $result->getGates()[0]->status);
+        self::assertNotNull($result->getTime());
+        self::assertNotNull($result->getMemory());
+        self::assertSame($rawBaseline, file_get_contents($this->tmpDir . '/catraca_baseline.json'));
     }
 
     public function test_native_check_round_trip_preserves_configured_lists(): void

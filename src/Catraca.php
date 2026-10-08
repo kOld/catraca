@@ -141,7 +141,9 @@ class Catraca
 
     public function check(?GateRunObserverInterface $observer = null): CheckResult
     {
-        $this->baseline->init();
+        if (!$this->baseline->exists()) {
+            $this->baseline->init();
+        }
 
         $start = hrtime(true);
         $result = new CheckResult();
