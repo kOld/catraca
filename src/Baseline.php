@@ -8,8 +8,8 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
 
-use function array_key_exists;
 use function array_filter;
+use function array_key_exists;
 use function array_merge;
 use function array_replace_recursive;
 use function explode;
@@ -176,6 +176,11 @@ class Baseline
         return $this->changedFrom;
     }
 
+    public function getTimeoutOverride(): ?int
+    {
+        return $this->timeoutOverride;
+    }
+
     public function getPolicy(string $key, mixed $default = null): mixed
     {
         return $this->getConfig('policy', $key, $default);
@@ -265,6 +270,40 @@ class Baseline
         }
 
         return $memoryLimit;
+    }
+
+    public function getPhpCsFixerCacheFile(): string
+    {
+        $configured = $this->getStringConfig(
+            'tools',
+            'options.php_cs_fixer.cache_file',
+            '.catraca-cache/performance-php-cs-fixer.cache',
+        );
+
+        if ($configured === '') {
+            $configured = '.catraca-cache/performance-php-cs-fixer.cache';
+        }
+
+        if (str_starts_with($configured, DIRECTORY_SEPARATOR)) {
+            return $configured;
+        }
+
+        return $this->projectRoot . '/' . ltrim($configured, '/');
+    }
+
+    public function getPintCacheFile(): string
+    {
+        $configured = $this->getStringConfig('tools', 'options.pint.cache_file', '.pint.cache');
+
+        if ($configured === '') {
+            $configured = '.pint.cache';
+        }
+
+        if (str_starts_with($configured, DIRECTORY_SEPARATOR)) {
+            return $configured;
+        }
+
+        return $this->projectRoot . '/' . ltrim($configured, '/');
     }
 
     public function getMagoThreads(): int
@@ -451,7 +490,7 @@ class Baseline
         if ($this->profile !== 'default') {
             $profileData = $data['profiles'][$this->profile][$group] ?? [];
             if (is_array($profileData)) {
-                $groupData = $group === 'config' ? array_replace_recursive($groupData, $profileData) : $profileData;
+                $groupData = array_replace_recursive($groupData, $profileData);
             }
         }
 

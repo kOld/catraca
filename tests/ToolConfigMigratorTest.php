@@ -142,6 +142,20 @@ final class ToolConfigMigratorTest extends TestCase
         self::assertSame('auto', $migrated['config']['tools']['format']);
     }
 
+    public function test_disabled_legacy_mago_selects_a_valid_backend_for_every_gate(): void
+    {
+        $data = $this->v1Baseline(['tool' => 'auto']);
+        $data['config']['mago']['enabled'] = false;
+
+        $migrated = ToolConfigMigrator::migrate($data);
+
+        $tools = $migrated['config']['tools'];
+        self::assertSame('pint', $tools['format']);
+        self::assertSame('phpstan', $tools['analyze']);
+        self::assertSame('auto', $tools['coverage']);
+        self::assertSame('php-cs-fixer', $tools['lint']);
+    }
+
     /**
      * @param  array<string, mixed>|null  $tool
      * @return array<string, mixed>

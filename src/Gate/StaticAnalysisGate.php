@@ -18,13 +18,17 @@ use JsonException;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 
+use function array_is_list;
 use function array_slice;
+use function array_values;
 use function count;
 use function is_array;
 use function is_int;
 use function is_string;
 use function json_decode;
+use function ltrim;
 use function sprintf;
+use function str_starts_with;
 
 use const JSON_THROW_ON_ERROR;
 
@@ -91,34 +95,44 @@ readonly class StaticAnalysisGate implements GateInterface
         try {
             $data = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
-            throw new RuntimeException(sprintf(
-                'PHPStan returned invalid JSON (exit code %s): %s',
-                $process->getExitCode() ?? 'unknown',
-                $exception->getMessage(),
-            ), previous: $exception);
+            throw new RuntimeException(
+                sprintf(
+                    'PHPStan returned invalid JSON (exit code %s): %s. Raw output: %s',
+                    $process->getExitCode() ?? 'unknown',
+                    $exception->getMessage(),
+                    trim($output),
+                ),
+                previous: $exception,
+            );
         }
 
-        if (!is_array($data) || !is_array($data['totals'] ?? null)) {
+        if (
+            !is_array($data)
+            || !is_array($data['totals'] ?? null)
+            || !is_int($data['totals']['errors'] ?? null)
+            || !is_int($data['totals']['file_errors'] ?? null)
+            || !is_array($data['files'] ?? null)
+        ) {
             throw new RuntimeException(sprintf(
-                'PHPStan returned an invalid result (exit code %s).',
+                'PHPStan returned an invalid result (exit code %s). Raw output: %s',
                 $process->getExitCode() ?? 'unknown',
+                trim($output),
             ));
         }
 
         $exitCode = $process->getExitCode();
         if ($exitCode !== 0 && $exitCode !== 1) {
-            throw new RuntimeException(sprintf(
-                'PHPStan failed with exit code %s.',
-                $exitCode ?? 'unknown',
-            ));
+            throw new RuntimeException(sprintf('PHPStan failed with exit code %s.', $exitCode ?? 'unknown'));
         }
 
-        /** @var array<int, array{file: string, line: int, message: string, ignorable: bool}> $errors */
+        /** @var array<int, array<string, mixed>> $errors */
         $errors = [];
         /** @var array<int, string> $files */
         $files = [];
         /** @var array{file_errors: int, errors: int} $totals */
         $totals = ['file_errors' => 0, 'errors' => 0];
+        /** @var array<int, mixed> $globalErrors */
+        $globalErrors = is_array($data['errors'] ?? null) ? array_values($data['errors']) : [];
 
         if (is_array($data)) {
             /** @var array<string, mixed> $rawTotals */
@@ -151,7 +165,18 @@ readonly class StaticAnalysisGate implements GateInterface
             }
         }
 
-        $errorCount = $totals['file_errors'] + $totals['errors'];
+        foreach ($globalErrors as $globalError) {
+            $errors[] = [
+                'file' => '[global]',
+                'line' => 0,
+                'message' => is_string($globalError) ? $globalError : (string) json_encode($globalError),
+                'ignorable' => false,
+                'raw' => $globalError,
+            ];
+            $files[] = '[global]:0';
+        }
+
+        $errorCount = $totals['file_errors'] + max($totals['errors'], count($globalErrors));
 
         return $this->buildResult($errorCount, $errors, $files, $baseline, 'PHPStan');
     }
@@ -164,34 +189,61 @@ readonly class StaticAnalysisGate implements GateInterface
             '--output-format=json',
             '--no-progress',
         ], timeout: $baseline->getGateTimeout('static_analysis'));
+        $process->setWorkingDirectory($baseline->projectRoot);
         $process->run();
 
         $output = $process->getOutput() !== '' ? $process->getOutput() : $process->getErrorOutput();
         /** @var mixed $data */
         $data = json_decode($output, true);
 
+        if ($process->getExitCode() !== 0 && $process->getExitCode() !== 2) {
+            throw new RuntimeException(sprintf(
+                'Psalm failed with exit code %s. Raw output: %s',
+                $process->getExitCode() ?? 'unknown',
+                trim($output),
+            ));
+        }
+
+        if (!is_array($data)) {
+            throw new RuntimeException(sprintf(
+                'Psalm returned invalid JSON (exit code %s). Raw output: %s',
+                $process->getExitCode() ?? 'unknown',
+                trim($output),
+            ));
+        }
+
+        if (
+            !str_starts_with(ltrim($output), '[')
+            || !array_is_list($data)
+            || $process->getExitCode() === 2 && $data === []
+        ) {
+            throw new RuntimeException('Psalm returned an invalid result: expected a list of reported issues.');
+        }
+
         /** @var array<int, array{file: string, line: int, message: string, severity: string}> $errors */
         $errors = [];
         /** @var array<int, string> $files */
         $files = [];
 
-        if (is_array($data)) {
-            foreach ($data as $issue) {
-                if (!is_array($issue)) {
-                    continue;
-                }
-                $filePath = $issue['file_path'] ?? null;
-                if (is_string($filePath)) {
-                    $line = is_int($issue['line_from'] ?? null) ? $issue['line_from'] : 0;
-                    $errors[] = [
-                        'file' => $filePath,
-                        'line' => $line,
-                        'message' => is_string($issue['message'] ?? null) ? $issue['message'] : '',
-                        'severity' => is_string($issue['severity'] ?? null) ? $issue['severity'] : 'error',
-                    ];
-                    $files[] = $filePath . ':' . $line;
-                }
+        foreach ($data as $issue) {
+            if (
+                !is_array($issue)
+                || !is_string($issue['file_path'] ?? null)
+                || $issue['file_path'] === ''
+                || !is_int($issue['line_from'] ?? null)
+                || !is_string($issue['message'] ?? null)
+                || !is_string($issue['severity'] ?? null)
+            ) {
+                throw new RuntimeException('Psalm returned an invalid result: malformed issue entry.');
             }
+
+            $errors[] = [
+                'file' => $issue['file_path'],
+                'line' => $issue['line_from'],
+                'message' => $issue['message'],
+                'severity' => $issue['severity'],
+            ];
+            $files[] = $issue['file_path'] . ':' . $issue['line_from'];
         }
 
         return $this->buildResult(count($errors), $errors, $files, $baseline, 'Psalm');

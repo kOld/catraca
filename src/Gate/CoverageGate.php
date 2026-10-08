@@ -18,6 +18,7 @@ use Symfony\Component\Process\Process;
 
 use function is_string;
 use function sprintf;
+use function trim;
 
 class CoverageGate implements GateInterface
 {
@@ -40,7 +41,7 @@ class CoverageGate implements GateInterface
 
         $tool = GateToolRegistry::resolve($baseline, $resolver, 'coverage');
         if ($tool !== null) {
-            return $this->runRunner($tool->path, $baseline, $resolver, $cwd);
+            return $this->runRunner($tool->name, $tool->path, $baseline, $resolver, $cwd);
         }
 
         return new GateResult(
@@ -60,8 +61,13 @@ class CoverageGate implements GateInterface
         return $mode ?? PolicyMode::NoRegression;
     }
 
-    private function runRunner(string $runner, Baseline $baseline, ToolResolver $resolver, string $cwd): GateResult
-    {
+    private function runRunner(
+        string $toolName,
+        string $runner,
+        Baseline $baseline,
+        ToolResolver $resolver,
+        string $cwd,
+    ): GateResult {
         $tmpDir = sys_get_temp_dir() . '/catraca-' . uniqid('', true);
         if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) {
             throw new RuntimeException(sprintf('Directory "%s" was not created', $tmpDir));
@@ -81,18 +87,36 @@ class CoverageGate implements GateInterface
         $process->run();
 
         $coverage = $this->parseClover($cloverPath);
+        $combinedOutput = $process->getOutput() . $process->getErrorOutput();
         if ($coverage === null) {
-            $coverage = $this->parseCoverageFromText($process->getOutput());
+            $coverage = $this->parseCoverageFromText($combinedOutput);
         }
 
         $this->cleanup($tmpDir);
 
         $baselineCoverage = $this->getBaselineCoverage($baseline);
         [$status, $actions] = $this->evaluateCoverage($coverage, $baselineCoverage);
+        $exitCode = $process->getExitCode();
+        $executionError = $exitCode !== 0;
+        if ($executionError || $coverage === null) {
+            $status = Status::Fail;
+            $actions = null;
+        }
 
-        $message = $coverage !== null
-            ? sprintf('%.2f%% (baseline: %.2f%%)', $coverage, $baselineCoverage)
-            : 'Could not determine coverage (is xdebug or pcov enabled?)';
+        $message = $executionError
+            ? sprintf('%s failed with exit code %s.', $toolName, $exitCode ?? 'unknown')
+            : (
+                $coverage !== null
+                    ? sprintf('%.2f%% (baseline: %.2f%%) via %s', $coverage, $baselineCoverage, $toolName)
+                    : 'Could not determine coverage (is xdebug or pcov enabled?)'
+            );
+        $details = [];
+        if ($process->getErrorOutput() !== '') {
+            $details['stderr'] = trim($process->getErrorOutput());
+        }
+        if ($process->getOutput() !== '') {
+            $details['stdout'] = trim($process->getOutput());
+        }
 
         return new GateResult(
             status: $status,
@@ -103,6 +127,7 @@ class CoverageGate implements GateInterface
             baseline: ['percentage' => $baselineCoverage],
             current: ['percentage' => $coverage],
             actions: $actions,
+            details: $details === [] ? null : $details,
         );
     }
 

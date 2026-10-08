@@ -104,6 +104,29 @@ final class GateToolRegistryTest extends TestCase
         GateToolRegistry::resolve($baseline, new ToolResolver($this->tmpDir), 'style');
     }
 
+    public function test_performance_uses_php_cs_fixer_as_its_only_backend(): void
+    {
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->init();
+
+        self::assertSame(['php-cs-fixer'], GateToolRegistry::candidates($baseline, 'performance'));
+        self::assertSame('php-cs-fixer', GateToolRegistry::description('performance'));
+    }
+
+    public function test_mago_is_rejected_as_an_explicit_performance_backend(): void
+    {
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => ['tools' => ['lint' => 'mago']],
+            'results' => [],
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid tool "mago" for performance. Use one of: auto, php-cs-fixer.');
+
+        GateToolRegistry::candidates($baseline, 'performance');
+    }
+
     private function writeTool(string $name, string $contents): void
     {
         $path = $this->tmpDir . '/vendor/bin/' . $name;

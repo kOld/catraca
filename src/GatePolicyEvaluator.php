@@ -45,6 +45,10 @@ final readonly class GatePolicyEvaluator
 
         $current = $result->current[$metric['metric']] ?? null;
         if ($current === null) {
+            if ($result->status === Status::Fail) {
+                return $result;
+            }
+
             return $this->withStatus(
                 $result,
                 $this->failureStatus($baseline->getPolicy('unavailable_metric', FailurePolicy::Warn->value)),
@@ -114,6 +118,8 @@ final readonly class GatePolicyEvaluator
             current: $result->current,
             actions: $status === Status::Fail ? $result->actions : null,
             details: $result->details,
+            elapsedNanoseconds: $result->elapsedNanoseconds,
+            executedTools: $result->executedTools,
         );
     }
 }

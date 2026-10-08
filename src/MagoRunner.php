@@ -60,21 +60,6 @@ final class MagoRunner
         return $this->execute($arguments, $baseline, 'format');
     }
 
-    /** @param array<int, string> $paths */
-    public function fixLint(string $mago, array $paths, Baseline $baseline): MagoRunResult
-    {
-        return $this->execute(
-            array_merge(
-                $this->baseArguments($mago, $baseline),
-                ['lint', '--only', implode(',', self::PERFORMANCE_RULES)],
-                $paths,
-                ['--fix', '--format-after-fix', '--fail-on-remaining'],
-            ),
-            $baseline,
-            'lint',
-        );
-    }
-
     /** @return array<int, string> */
     private function baseArguments(string $mago, Baseline $baseline): array
     {

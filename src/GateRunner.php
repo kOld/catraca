@@ -5,6 +5,14 @@ declare(strict_types=1);
 namespace B7S\Catraca;
 
 use B7S\Catraca\Enum\Status;
+use B7S\Catraca\Gate\ComplexityGate;
+use B7S\Catraca\Gate\CoverageGate;
+use B7S\Catraca\Gate\DuplicationGate;
+use B7S\Catraca\Gate\FileSizeGate;
+use B7S\Catraca\Gate\PerformanceGate;
+use B7S\Catraca\Gate\SecurityGate;
+use B7S\Catraca\Gate\StaticAnalysisGate;
+use B7S\Catraca\Gate\StyleGate;
 use Parallite\ForkExecutor;
 use Throwable;
 
@@ -12,8 +20,12 @@ use function array_keys;
 use function array_map;
 use function count;
 use function get_class;
+use function hrtime;
 use function is_array;
 use function min;
+use function preg_match;
+use function strtolower;
+use function trim;
 
 class GateRunner
 {
@@ -70,11 +82,13 @@ class GateRunner
 
             $observer?->tick();
 
+            $startedAt = hrtime(true);
             try {
                 $gateResult = $gateDef['gate']->run($this->baseline, $this->resolver);
             } catch (Throwable $exception) {
                 $gateResult = $this->errorResult($gateDef['name'], $exception);
             }
+            $gateResult = $this->decorateResult($gateResult, (int) (hrtime(true) - $startedAt), $gateDef['gate']);
             $gateResult = (new GatePolicyEvaluator())->evaluate($gateResult, $this->baseline);
 
             $results[] = $gateResult;
@@ -97,11 +111,19 @@ class GateRunner
 
         $profile = $this->baseline->getProfile();
         $changedFrom = $this->baseline->getChangedFrom();
+        $timeoutOverride = $this->baseline->getTimeoutOverride();
         foreach ($this->gates as $gateDef) {
             $gateName = $gateDef['name'];
             $gateClass = $gateDef['gate']::class;
 
-            $closures[] = static function () use ($projectRoot, $gateName, $gateClass, $profile, $changedFrom): array {
+            $closures[] = static function () use (
+                $projectRoot,
+                $gateName,
+                $gateClass,
+                $profile,
+                $changedFrom,
+                $timeoutOverride,
+            ): array {
                 try {
                     // The gate is already a worker, so child gates must not
                     // recursively create another worker pool.
@@ -110,11 +132,17 @@ class GateRunner
                         parallelOverride: false,
                         profile: $profile,
                         changedFrom: $changedFrom,
+                        timeoutOverride: $timeoutOverride,
                     );
                     $resolver = new ToolResolver($projectRoot);
                     $gate = new $gateClass();
 
-                    return $gate->run($baseline, $resolver)->toArray();
+                    $startedAt = hrtime(true);
+                    $result = $gate->run($baseline, $resolver);
+
+                    return $result
+                        ->withExecutionMetadata((int) (hrtime(true) - $startedAt), self::executedTools($gate, $result))
+                        ->toArray();
                 } catch (Throwable $exception) {
                     return self::errorData($gateName, $exception);
                 }
@@ -159,7 +187,7 @@ class GateRunner
 
         if (!is_array($data) || !GateResult::isSerializedData($data)) {
             return new GateResult(
-                status: Status::Skip,
+                status: Status::Fail,
                 name: 'unknown',
                 label: $gateDef['name'],
                 message: 'Invalid result from child process',
@@ -176,10 +204,59 @@ class GateRunner
          *     baseline?: array<string, mixed>|null,
          *     current?: array<string, mixed>|null,
          *     actions?: array<int, array{type: string, message: string, files?: array<int, string>, reasons?: array<int, string>}>|null,
-         *     details?: array<string, mixed>|null
+         *     details?: array<string, mixed>|null,
+         *     elapsed_ns?: int|null,
+         *     executed_tools?: array<int, string>
          * } $data
          */
         return (new GatePolicyEvaluator())->evaluate(GateResult::fromArray($data), $this->baseline);
+    }
+
+    private function decorateResult(GateResult $result, int $elapsedNanoseconds, GateInterface $gate): GateResult
+    {
+        return $result->withExecutionMetadata($elapsedNanoseconds, self::executedTools($gate, $result));
+    }
+
+    /**
+     * Gate implementations intentionally return quality data only. The runner
+     * adds the execution provenance so JSON consumers can see which work ran.
+     *
+     * @return array<int, string>
+     */
+    private static function executedTools(GateInterface $gate, GateResult $result): array
+    {
+        if ($result->status === Status::Skip) {
+            return [];
+        }
+
+        if (preg_match('/\s+via\s+([^,)]+)/i', $result->message, $matches) === 1) {
+            return [strtolower(trim($matches[1]))];
+        }
+
+        $tools = $result->details['tools'] ?? null;
+        if (is_array($tools)) {
+            $toolNames = [];
+            foreach ($tools as $tool) {
+                if (is_string($tool) && $tool !== '') {
+                    $toolNames[] = $tool;
+                }
+            }
+            if ($toolNames !== []) {
+                return $toolNames;
+            }
+        }
+
+        return match ($gate::class) {
+            SecurityGate::class => ['composer audit', 'built-in security checks'],
+            ComplexityGate::class => ['phpmetrics'],
+            CoverageGate::class => ['test runner'],
+            DuplicationGate::class => ['phpcpd'],
+            FileSizeGate::class => ['built-in file-size scanner'],
+            PerformanceGate::class => ['built-in performance checks'],
+            StyleGate::class => ['code style tool'],
+            StaticAnalysisGate::class => ['static analysis tool'],
+            default => [],
+        };
     }
 
     private function errorResult(string $label, Throwable $exception): GateResult

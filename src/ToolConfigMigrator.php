@@ -115,8 +115,19 @@ final class ToolConfigMigrator
                 continue;
             }
 
-            $tools[$operation] = GateToolRegistry::FALLBACKS[$gate][1];
+            $tools[$operation] = self::firstNonMagoFallback($gate);
         }
+    }
+
+    private static function firstNonMagoFallback(string $gate): string
+    {
+        foreach (GateToolRegistry::FALLBACKS[$gate] ?? [] as $candidate) {
+            if ($candidate !== 'mago') {
+                return $candidate;
+            }
+        }
+
+        return GateToolRegistry::DEFAULT;
     }
 
     /**

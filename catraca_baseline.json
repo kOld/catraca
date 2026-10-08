@@ -55,7 +55,8 @@
             "fixers": {
                 "condition_order": false
             },
-            "mode": "no_regression"
+            "mode": "no_regression",
+            "informational_rules": []
         },
         "source_dirs": {
             "paths": [],
@@ -102,6 +103,15 @@
                     "threads": 0,
                     "minimum_report_level": "warning",
                     "minimum_version": "1.45.0"
+                },
+                "phpstan": {
+                    "memory_limit": "512M"
+                },
+                "php_cs_fixer": {
+                    "cache_file": ".catraca-cache/performance-php-cs-fixer.cache"
+                },
+                "pint": {
+                    "cache_file": ".pint.cache"
                 }
             }
         }
@@ -129,13 +139,13 @@
             "over_limit": 0
         },
         "complexity": {
-            "max_ccn": 0,
+            "max_ccn": 36,
             "violations": 0,
-            "warnings": 0
+            "warnings": 9
         },
         "performance": {
             "violations": 0
         }
     },
-    "updated_at": "2026-08-06T11:00:50+00:00"
+    "updated_at": "2026-10-07T22:54:36+00:00"
 }

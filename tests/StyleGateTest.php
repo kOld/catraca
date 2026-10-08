@@ -1,0 +1,203 @@
+<?php
+
+declare(strict_types=1);
+
+namespace B7S\Catraca\Tests;
+
+use B7S\Catraca\Baseline;
+use B7S\Catraca\Enum\Status;
+use B7S\Catraca\Gate\StyleGate;
+use B7S\Catraca\GatePolicyEvaluator;
+use B7S\Catraca\ToolResolver;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
+
+use function chmod;
+use function escapeshellarg;
+use function file_exists;
+use function file_put_contents;
+use function is_dir;
+use function mkdir;
+use function rmdir;
+use function sys_get_temp_dir;
+use function uniqid;
+use function unlink;
+
+final class StyleGateTest extends TestCase
+{
+    private string $tmpDir;
+
+    protected function setUp(): void
+    {
+        $this->tmpDir = sys_get_temp_dir() . '/catraca-style-test-' . uniqid('', true);
+        mkdir($this->tmpDir . '/vendor/bin', 0755, true);
+        mkdir($this->tmpDir . '/src', 0755, true);
+        file_put_contents($this->tmpDir . '/src/Sample.php', "<?php\n");
+        file_put_contents($this->tmpDir . '/vendor/bin/pint', <<<'PHP'
+            #!/usr/bin/env php
+            <?php
+            fwrite(STDERR, 'pint crashed');
+            exit(2);
+            PHP);
+        file_put_contents($this->tmpDir . '/vendor/bin/php-cs-fixer', <<<'PHP'
+            #!/usr/bin/env php
+            <?php
+            fwrite(STDERR, 'php-cs-fixer crashed');
+            exit(16);
+            PHP);
+        chmod($this->tmpDir . '/vendor/bin/pint', 0755);
+        chmod($this->tmpDir . '/vendor/bin/php-cs-fixer', 0755);
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ([
+            'catraca_baseline.json',
+            '.php-cs-fixer.php',
+            'src/Sample.php',
+            'vendor/bin/pint',
+            'vendor/bin/php-cs-fixer',
+        ] as $path) {
+            $absolutePath = $this->tmpDir . '/' . $path;
+            if (file_exists($absolutePath)) {
+                unlink($absolutePath);
+            }
+        }
+        foreach (['src/first/Sample.php', 'src/second/Sample.php', '.php-cs-fixer.cache'] as $path) {
+            $absolutePath = $this->tmpDir . '/' . $path;
+            if (file_exists($absolutePath)) {
+                unlink($absolutePath);
+            }
+        }
+        if (is_dir($this->tmpDir . '/src/first')) {
+            rmdir($this->tmpDir . '/src/first');
+        }
+        if (is_dir($this->tmpDir . '/src/second')) {
+            rmdir($this->tmpDir . '/src/second');
+        }
+        rmdir($this->tmpDir . '/src');
+        rmdir($this->tmpDir . '/vendor/bin');
+        rmdir($this->tmpDir . '/vendor');
+        rmdir($this->tmpDir);
+    }
+
+    #[DataProvider('executionFailureCases')]
+    public function test_execution_failure_cannot_be_downgraded_by_policy(string $tool, string $mode): void
+    {
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src']],
+                'tools' => ['format' => $tool],
+                'style' => ['mode' => $mode],
+            ],
+            'results' => ['style' => ['violations' => 10]],
+        ]);
+
+        $result = (new GatePolicyEvaluator())->evaluate(
+            (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir)),
+            $baseline,
+        );
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertNull($result->current);
+    }
+
+    public function test_native_php_cs_fixer_accepts_multiple_source_directories(): void
+    {
+        mkdir($this->tmpDir . '/src/first', 0755, true);
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/first/Sample.php', "<?php\n");
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src/first', 'src/second']],
+                'tools' => ['format' => 'php-cs-fixer'],
+            ],
+            'results' => [],
+        ]);
+
+        $result = (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+    }
+
+    public function test_native_php_cs_fixer_accepts_a_source_file_and_directory(): void
+    {
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src/Sample.php', 'src/second']],
+                'tools' => ['format' => 'php-cs-fixer'],
+            ],
+            'results' => [],
+        ]);
+
+        $result = (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+    }
+
+    public function test_native_php_cs_fixer_uses_an_existing_relative_config_from_the_project_root(): void
+    {
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/Sample.php', "<?php\n\$value = \"value\";\n");
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n\$other = \"value\";\n");
+        file_put_contents($this->tmpDir . '/.php-cs-fixer.php', <<<'PHP'
+            <?php
+            return (new PhpCsFixer\Config())
+                ->setRules(['single_quote' => true])
+                ->setFinder(PhpCsFixer\Finder::create()->in('src'));
+            PHP);
+        $this->writeNativeFixerProxy();
+
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src/Sample.php', 'src/second']],
+                'tools' => ['format' => 'php-cs-fixer'],
+            ],
+            'results' => [],
+        ]);
+
+        $result = (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertGreaterThan(0, $result->current['violations']);
+    }
+
+    /** @return array<string, array{tool: string, mode: string}> */
+    public static function executionFailureCases(): array
+    {
+        return [
+            'pint no regression' => ['tool' => 'pint', 'mode' => 'no_regression'],
+            'pint informational' => ['tool' => 'pint', 'mode' => 'informational'],
+            'php cs fixer no regression' => ['tool' => 'php-cs-fixer', 'mode' => 'no_regression'],
+            'php cs fixer informational' => ['tool' => 'php-cs-fixer', 'mode' => 'informational'],
+        ];
+    }
+
+    private function writeNativeFixerProxy(): void
+    {
+        $realFixer = dirname(__DIR__) . '/vendor/bin/php-cs-fixer';
+        file_put_contents(
+            $this->tmpDir . '/vendor/bin/php-cs-fixer',
+            "#!/usr/bin/env php\n<?php\n"
+            . "\$command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg("
+            . var_export($realFixer, true)
+            . ");\n"
+            . "\$command .= ' ' . implode(' ', array_map('escapeshellarg', array_slice(\$argv, 1)));\n"
+            . "passthru(\$command, \$exitCode);\nexit(\$exitCode);\n",
+        );
+        chmod($this->tmpDir . '/vendor/bin/php-cs-fixer', 0755);
+    }
+}

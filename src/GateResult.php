@@ -1,13 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace B7S\Catraca;
 
 use B7S\Catraca\Enum\ActionType;
 use B7S\Catraca\Enum\Severity;
 use B7S\Catraca\Enum\Status;
 
+use function array_unique;
+use function array_values;
 use function is_array;
+use function is_int;
 use function is_string;
+use function round;
 
 readonly class GateResult
 {
@@ -16,6 +22,7 @@ readonly class GateResult
      * @param  array<string, mixed>|null  $current
      * @param  array<string, mixed>|null  $details
      * @param  array<array{type: ActionType, message: string, files?: array<int, string>, reasons?: array<int, string>}>|null  $actions
+     * @param  array<int, string>  $executedTools
      */
     public function __construct(
         public Status $status,
@@ -27,6 +34,8 @@ readonly class GateResult
         public ?array $current = null,
         public ?array $actions = null,
         public ?array $details = null,
+        public ?int $elapsedNanoseconds = null,
+        public array $executedTools = [],
     ) {}
 
     public function isPass(): bool
@@ -37,6 +46,28 @@ readonly class GateResult
     public function isFail(): bool
     {
         return $this->status === Status::Fail || $this->status === Status::Cancelled;
+    }
+
+    /**
+     * Adds execution metadata without changing the gate's quality result.
+     *
+     * @param  array<int, string>  $executedTools
+     */
+    public function withExecutionMetadata(int $elapsedNanoseconds, array $executedTools): self
+    {
+        return new self(
+            status: $this->status,
+            name: $this->name,
+            label: $this->label,
+            message: $this->message,
+            severity: $this->severity,
+            baseline: $this->baseline,
+            current: $this->current,
+            actions: $this->actions,
+            details: $this->details,
+            elapsedNanoseconds: $elapsedNanoseconds,
+            executedTools: array_values(array_unique($executedTools)),
+        );
     }
 
     /** @param array<array-key, mixed> $data */
@@ -63,6 +94,16 @@ readonly class GateResult
             if (isset($data[$key]) && !is_array($data[$key])) {
                 return false;
             }
+        }
+
+        $elapsed = $data['elapsed_ns'] ?? null;
+        if ($elapsed !== null && !is_int($elapsed)) {
+            return false;
+        }
+
+        $executedTools = $data['executed_tools'] ?? [];
+        if (!self::isStringList($executedTools)) {
+            return false;
         }
 
         /** @var mixed $actions */
@@ -118,7 +159,9 @@ readonly class GateResult
      *     baseline?: array<string, mixed>|null,
      *     current?: array<string, mixed>|null,
      *     actions?: array<int, array{type: string, message: string, files?: array<int, string>, reasons?: array<int, string>}>|null,
-     *     details?: array<string, mixed>|null
+     *     details?: array<string, mixed>|null,
+     *     elapsed_ns?: int|null,
+     *     executed_tools?: array<int, string>
      * } $data
      */
     public static function fromArray(array $data): self
@@ -147,6 +190,8 @@ readonly class GateResult
             // @mago-ignore analysis:less-specific-nested-argument-type
             actions: $actions,
             details: $data['details'] ?? null,
+            elapsedNanoseconds: is_int($data['elapsed_ns'] ?? null) ? $data['elapsed_ns'] : null,
+            executedTools: $data['executed_tools'] ?? [],
         );
     }
 
@@ -187,6 +232,12 @@ readonly class GateResult
         if ($this->details !== null) {
             $result['details'] = $this->details;
         }
+
+        $result['elapsed_ns'] = $this->elapsedNanoseconds;
+        $result['elapsed_ms'] = $this->elapsedNanoseconds === null
+            ? null
+            : round($this->elapsedNanoseconds / 1_000_000, 3);
+        $result['executed_tools'] = $this->executedTools;
 
         return $result;
     }

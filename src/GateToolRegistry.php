@@ -22,7 +22,7 @@ final class GateToolRegistry
         'style' => ['mago', 'pint', 'php-cs-fixer'],
         'static_analysis' => ['mago', 'phpstan', 'psalm'],
         'coverage' => ['pest', 'phpunit'],
-        'performance' => ['mago', 'php-cs-fixer'],
+        'performance' => ['php-cs-fixer'],
     ];
 
     public const array OPERATIONS = [
@@ -35,7 +35,6 @@ final class GateToolRegistry
     public static function resolve(Baseline $baseline, ToolResolver $resolver, string $gate): ?GateTool
     {
         $selected = $baseline->getGateTool($gate);
-
         foreach (self::candidates($baseline, $gate) as $name) {
             $path = $resolver->resolve($name);
             if ($path === null) {

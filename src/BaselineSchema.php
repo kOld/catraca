@@ -6,6 +6,7 @@ namespace B7S\Catraca;
 
 use B7S\Catraca\Gate\SecurityGate;
 
+use function array_is_list;
 use function array_key_exists;
 use function in_array;
 use function is_array;
@@ -61,6 +62,12 @@ final class BaselineSchema
                         'phpstan' => [
                             'memory_limit' => '512M',
                         ],
+                        'php_cs_fixer' => [
+                            'cache_file' => '.catraca-cache/performance-php-cs-fixer.cache',
+                        ],
+                        'pint' => [
+                            'cache_file' => '.pint.cache',
+                        ],
                     ],
                 ],
                 'history' => ['enabled' => false, 'retention' => 50],
@@ -78,6 +85,7 @@ final class BaselineSchema
                 ],
                 'performance' => [
                     'mode' => 'no_regression',
+                    'informational_rules' => [],
                     'rules' => [
                         'global_namespace_import' => true,
                         'no_unused_imports' => true,
@@ -203,25 +211,21 @@ final class BaselineSchema
 
             $current = $existing[$key] ?? null;
             if (is_array($default) && is_array($current)) {
-                $existing[$key] = self::mergeDefaults(self::object($current), self::object($default));
+                // Lists are complete user values. Recursing through them as
+                // objects would discard every numeric key, including an
+                // intentionally configured empty list.
+                if (array_is_list($current) || array_is_list($default)) {
+                    continue;
+                }
+
+                /** @var array<string, mixed> $currentObject */
+                $currentObject = $current;
+                /** @var array<string, mixed> $defaultObject */
+                $defaultObject = $default;
+                $existing[$key] = self::mergeDefaults($currentObject, $defaultObject);
             }
         }
 
         return $existing;
-    }
-
-    /** @return array<string, mixed> */
-    private static function object(array $value): array
-    {
-        $result = [];
-        foreach ($value as $key => $item) {
-            if (!is_string($key)) {
-                continue;
-            }
-
-            $result[$key] = $item;
-        }
-
-        return $result;
     }
 }

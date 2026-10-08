@@ -12,8 +12,10 @@ use B7S\Catraca\GateResult;
 use B7S\Catraca\ToolResolver;
 use PHPUnit\Framework\TestCase;
 
+use function chmod;
 use function file_exists;
 use function file_put_contents;
+use function is_dir;
 use function mkdir;
 use function rmdir;
 use function sys_get_temp_dir;
@@ -35,6 +37,7 @@ final class CoverageGateTest extends TestCase
 
     protected function tearDown(): void
     {
+        $this->removeRunner();
         if (file_exists($this->baselinePath)) {
             unlink($this->baselinePath);
         }
@@ -117,10 +120,36 @@ final class CoverageGateTest extends TestCase
         self::assertSame(Status::Fail, $result->status);
     }
 
+    public function test_runner_failure_does_not_become_a_passing_unknown_metric(): void
+    {
+        $this->createRunner('fail');
+        $baseline = $this->writeBaseline(['mode' => 'no_regression']);
+
+        $result = (new CoverageGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertNull($result->current['percentage']);
+        self::assertStringContainsString('exit code 7', $result->message);
+        $this->removeRunner();
+    }
+
+    public function test_missing_coverage_report_fails_even_when_runner_exits_successfully(): void
+    {
+        $this->createRunner('missing');
+        $baseline = $this->writeBaseline(['mode' => 'no_regression']);
+
+        $result = (new CoverageGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertNull($result->current['percentage']);
+        self::assertStringContainsString('Could not determine coverage', $result->message);
+        $this->removeRunner();
+    }
+
     /**
      * @param array<string, mixed> $coverageConfig
      */
-    private function writeBaseline(array $coverageConfig): void
+    private function writeBaseline(array $coverageConfig): Baseline
     {
         $data = [
             'schema' => Baseline::SCHEMA,
@@ -151,5 +180,39 @@ final class CoverageGateTest extends TestCase
             ],
         ];
         file_put_contents($this->baselinePath, json_encode($data, JSON_PRETTY_PRINT) ?: '');
+
+        return new Baseline($this->tmpDir);
+    }
+
+    private function createRunner(string $mode): void
+    {
+        mkdir($this->tmpDir . '/vendor/bin', 0755, true);
+        file_put_contents($this->tmpDir . '/coverage-mode', $mode);
+        file_put_contents($this->tmpDir . '/vendor/bin/phpunit', <<<'PHP'
+            #!/usr/bin/env php
+            <?php
+            $root = dirname(__DIR__, 2);
+            if (trim((string) file_get_contents($root . '/coverage-mode')) === 'fail') {
+                fwrite(STDERR, 'runner failed');
+                exit(7);
+            }
+            PHP);
+        chmod($this->tmpDir . '/vendor/bin/phpunit', 0755);
+    }
+
+    private function removeRunner(): void
+    {
+        foreach (['vendor/bin/phpunit', 'coverage-mode'] as $path) {
+            $absolutePath = $this->tmpDir . '/' . $path;
+            if (file_exists($absolutePath)) {
+                unlink($absolutePath);
+            }
+        }
+        if (is_dir($this->tmpDir . '/vendor/bin')) {
+            rmdir($this->tmpDir . '/vendor/bin');
+        }
+        if (is_dir($this->tmpDir . '/vendor')) {
+            rmdir($this->tmpDir . '/vendor');
+        }
     }
 }

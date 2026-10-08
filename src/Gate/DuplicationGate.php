@@ -17,7 +17,9 @@ use Symfony\Component\Process\Process;
 use function array_slice;
 use function count;
 use function is_int;
+use function preg_match;
 use function sprintf;
+use function str_contains;
 use function strlen;
 
 class DuplicationGate implements GateInterface
@@ -50,6 +52,8 @@ class DuplicationGate implements GateInterface
 
         $command = [
             $resolver->resolvePhp(),
+            '-d',
+            'memory_limit=1G',
             $phpcpd,
             '--fuzzy',
             '--verbose',
@@ -64,6 +68,27 @@ class DuplicationGate implements GateInterface
         $process->run();
 
         $output = $process->getOutput() . $process->getErrorOutput();
+
+        $validReport =
+            preg_match('/([\d.]+)%\s+duplicated lines/', $output) === 1
+            || str_contains($output, 'No code clones found.');
+        if (!$validReport || !in_array($process->getExitCode(), [0, 1], true)) {
+            return new GateResult(
+                status: Status::Fail,
+                name: 'duplication',
+                label: 'Duplication',
+                message: $validReport
+                    ? sprintf('PHPCPD failed with exit code %s.', $process->getExitCode() ?? 'unknown')
+                    : 'PHPCPD returned an invalid duplication report.',
+                severity: Severity::Block,
+                baseline: ['percentage' => $this->getBaselineDup($baseline)],
+                current: null,
+                details: [
+                    'stderr' => $process->getErrorOutput(),
+                    'stdout' => $process->getOutput(),
+                ],
+            );
+        }
 
         return $this->parseResult($output, $baseline);
     }
@@ -105,6 +130,9 @@ class DuplicationGate implements GateInterface
         }
 
         $cloneCount = count($clones);
+        if (preg_match('/Found\s+(\d+)\s+code clones?\b/i', $output, $summaryMatch) === 1) {
+            $cloneCount = (int) $summaryMatch[1];
+        }
         $baselineDup = $this->getBaselineDup($baseline);
 
         $status = Status::Pass;

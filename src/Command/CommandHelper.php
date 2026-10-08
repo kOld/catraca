@@ -25,6 +25,7 @@ use B7S\Catraca\Output\SarifFormatter;
 use B7S\Catraca\ProjectResolver;
 use B7S\Catraca\RunHistoryStore;
 use B7S\Catraca\ToolResolver;
+use InvalidArgumentException;
 use JsonException;
 use LogicException;
 use Symfony\Component\Console\Command\Command;
@@ -80,12 +81,27 @@ trait CommandHelper
         $changedFrom = $this->stringOption($input, 'changed-from');
         /** @var mixed $timeout */
         $timeout = $input->getOption('timeout');
+        $selectedGates = null;
+        if ($input->hasOption('gates')) {
+            try {
+                /** @var mixed $gatesOption */
+                $gatesOption = $input->getOption('gates');
+                $selectedGates = Catraca::parseGateSelection(is_string($gatesOption) ? $gatesOption : null);
+            } catch (InvalidArgumentException $exception) {
+                $output->writeln('<error>' . $exception->getMessage() . '</error>');
+
+                return Command::FAILURE;
+            }
+        }
+        $sequential = $input->hasOption('sequential') && $input->getOption('sequential') === true;
 
         $catraca = new Catraca(
             $projectRoot,
             profile: $profile,
             changedFrom: $changedFrom,
             timeoutOverride: is_numeric($timeout) ? (int) $timeout : null,
+            selectedGates: $selectedGates,
+            sequential: $sequential,
         );
         $this->projectCommand()->setActiveCatraca($catraca);
 
