@@ -15,6 +15,7 @@ use function is_string;
 use function json_decode;
 use function json_last_error;
 use function json_last_error_msg;
+use function preg_replace;
 use function strtolower;
 use function substr;
 use function trim;
@@ -346,8 +347,16 @@ final class DependencyAuditScanner
             return '';
         }
 
+        $diagnostic = (string) preg_replace('~(https?://)[^/\s:@]+(?::[^@\s]*)?@~i', '$1[redacted]@', $diagnostic);
+
         $diagnostic = (string) preg_replace(
-            '/(?i)(password|secret|token|api[_-]?key|authorization|private[_-]?key)([=: ]+)\S+/',
+            '~(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s]+~i',
+            '$1[redacted]',
+            $diagnostic,
+        );
+
+        $diagnostic = (string) preg_replace(
+            '/(?i)(password|secret|token|api[_-]?key|private[_-]?key)([=: ]+)\S+/',
             '$1$2[redacted]',
             $diagnostic,
         );
