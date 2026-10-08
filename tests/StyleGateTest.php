@@ -9,6 +9,7 @@ use B7S\Catraca\Enum\Status;
 use B7S\Catraca\Gate\StyleGate;
 use B7S\Catraca\GatePolicyEvaluator;
 use B7S\Catraca\ToolResolver;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 use function chmod;
@@ -60,9 +61,7 @@ final class StyleGateTest extends TestCase
         rmdir($this->tmpDir);
     }
 
-    /**
-     * @dataProvider executionFailureCases
-     */
+    #[DataProvider('executionFailureCases')]
     public function test_execution_failure_cannot_be_downgraded_by_policy(string $tool, string $mode): void
     {
         $baseline = new Baseline($this->tmpDir);
