@@ -32,7 +32,8 @@ use function unlink;
  *
  * The consumer project controls detection rules and allowlists through its own
  * `.gitleaks.toml` at the repository root; catraca auto-discovers it via
- * gitleaks' `--source` config lookup.
+ * gitleaks' `--source` config lookup. The source is passed as `.` from the
+ * repository working directory so allowlist paths remain relative and stable.
  *
  * @see https://github.com/gitleaks/gitleaks
  */
@@ -76,7 +77,7 @@ final class GitleaksScanner
                 '--report-path',
                 $reportPath,
                 '--source',
-                $this->root,
+                '.',
             ],
             $this->root,
             timeout: 180,

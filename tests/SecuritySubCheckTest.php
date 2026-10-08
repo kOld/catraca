@@ -418,6 +418,33 @@ final class SecuritySubCheckTest extends TestCase
         $this->assertSame([], $findings);
     }
 
+    public function test_gitleaks_keeps_nested_env_visible_when_root_env_is_allowlisted(): void
+    {
+        if (!$this->gitleaksAvailable()) {
+            $this->markTestSkipped('gitleaks binary is not installed');
+        }
+
+        $token = 'ghp_' . '8f4J9x2M7pQ5vR3nT6kW1zC4hY9uB2dL7sQ5';
+        $this->write('.gitleaks.toml', <<<'TOML'
+            title = "Catraca test policy"
+
+            [extend]
+            useDefault = true
+
+            [allowlist]
+            paths = ['^\.env$']
+            TOML);
+        $this->write('.env', "GITHUB_TOKEN={$token}\n");
+        $this->write('app/.env', "GITHUB_TOKEN={$token}\n");
+
+        $sub = new SecuritySubCheck($this->tmpDir, [$this->tmpDir]);
+
+        $findings = $sub->checkGitleaks();
+
+        self::assertCount(1, $findings);
+        self::assertStringContainsString('app/.env', $findings[0]);
+    }
+
     public function test_gitleaks_detects_a_synthetic_github_token_when_installed(): void
     {
         if (!$this->gitleaksAvailable()) {
