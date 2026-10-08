@@ -14,6 +14,7 @@ use B7S\Catraca\SourcePathResolver;
 use B7S\Catraca\ToolResolver;
 use Parallite\ForkExecutor;
 use Parallite\ParalliteClient;
+use RuntimeException;
 use Throwable;
 
 use function array_filter;
@@ -51,23 +52,23 @@ readonly class SecurityGate implements GateInterface
         'gitleaks' => true,
     ];
 
-    private const array SUB_CHECK_METHODS = [
-        'hardcoded_secrets' => 'checkHardcodedSecrets',
-        'sql_injection' => 'checkSqlInjection',
-        'command_injection' => 'checkCommandInjection',
-        'csrf_protection' => 'checkCsrf',
-        'path_traversal' => 'checkPathTraversal',
-        'insecure_deserialization' => 'checkInsecureDeserialization',
-        'ssrf' => 'checkSsrf',
-        'tls_verification' => 'checkTlsVerification',
-        'insecure_rng' => 'checkInsecureRng',
-        'gitignore_sensitive' => 'checkGitignore',
-        'package_freshness' => 'checkPackageFreshness',
-        'weak_cryptography' => 'checkWeakCryptography',
-        'cors_config' => 'checkCorsConfig',
-        'npm_audit' => 'checkNpmAudit',
-        'laravel_owasp' => 'checkLaravelOwasp',
-        'gitleaks' => 'checkGitleaks',
+    private const array SUB_CHECK_RULES = [
+        'hardcoded_secrets',
+        'sql_injection',
+        'command_injection',
+        'csrf_protection',
+        'path_traversal',
+        'insecure_deserialization',
+        'ssrf',
+        'tls_verification',
+        'insecure_rng',
+        'gitignore_sensitive',
+        'package_freshness',
+        'weak_cryptography',
+        'cors_config',
+        'npm_audit',
+        'laravel_owasp',
+        'gitleaks',
     ];
 
     public function __construct(
@@ -86,12 +87,12 @@ readonly class SecurityGate implements GateInterface
         $parallel = $baseline->isParallelEnabled() && ForkExecutor::isAvailable();
 
         $findingsByRule = $parallel
-            ? $this->runSubChecksParallel($root, $paths, $rules, $releasedDays, $resolver)
-            : $this->runSubChecksSequential($root, $paths, $rules, $releasedDays, $resolver);
+            ? $this->runSubChecksParallel($root, $paths, $rules, $releasedDays)
+            : $this->runSubChecksSequential($root, $paths, $rules, $releasedDays);
 
         $composerBin = $resolver->resolve('composer') ?? 'composer';
-        $sub = new SecuritySubCheck($root, $paths);
-        $composerAudit = $sub->runComposerAudit($composerBin);
+        $dependencyAudit = new DependencyAuditScanner($root);
+        $composerAudit = $dependencyAudit->runComposerAudit($composerBin);
         $findingsByRule['composer_audit'] = $composerAudit['findings'];
 
         $allFindings = array_merge(...array_values($findingsByRule));
@@ -139,24 +140,19 @@ readonly class SecurityGate implements GateInterface
      * @param  array<int, string>  $paths
      * @param  array<string, bool>  $rules
      */
-    private function runSubChecksSequential(
-        string $root,
-        array $paths,
-        array $rules,
-        int $releasedDays,
-        ToolResolver $resolver,
-    ): array {
+    private function runSubChecksSequential(string $root, array $paths, array $rules, int $releasedDays): array
+    {
         $sub = new SecuritySubCheck($root, $paths);
         $findingsByRule = [];
 
-        foreach (self::SUB_CHECK_METHODS as $rule => $method) {
+        foreach (self::SUB_CHECK_RULES as $rule) {
             if (!($rules[$rule] ?? true)) {
                 $findingsByRule[$rule] = [];
 
                 continue;
             }
 
-            $findingsByRule[$rule] = self::runSubCheck($sub, $rule, $releasedDays);
+            $findingsByRule[$rule] = self::runSubCheck($sub, $root, $rule, $releasedDays);
         }
 
         return $findingsByRule;
@@ -169,18 +165,13 @@ readonly class SecurityGate implements GateInterface
      *
      * @throws Throwable
      */
-    private function runSubChecksParallel(
-        string $root,
-        array $paths,
-        array $rules,
-        int $releasedDays,
-        ToolResolver $resolver,
-    ): array {
+    private function runSubChecksParallel(string $root, array $paths, array $rules, int $releasedDays): array
+    {
         $client = new ParalliteClient();
         $closures = [];
         $ruleOrder = [];
 
-        foreach (self::SUB_CHECK_METHODS as $rule => $_method) {
+        foreach (self::SUB_CHECK_RULES as $rule) {
             if (!($rules[$rule] ?? true)) {
                 continue;
             }
@@ -188,6 +179,7 @@ readonly class SecurityGate implements GateInterface
             $ruleOrder[] = $rule;
             $closures[] = static fn(): array => self::runSubCheck(
                 new SecuritySubCheck($root, $paths),
+                $root,
                 $rule,
                 $releasedDays,
             );
@@ -201,7 +193,7 @@ readonly class SecurityGate implements GateInterface
             $findingsByRule[$rule] = self::stringList($data);
         }
 
-        foreach (array_keys(self::SUB_CHECK_METHODS) as $rule) {
+        foreach (self::SUB_CHECK_RULES as $rule) {
             if (!isset($findingsByRule[$rule])) {
                 $findingsByRule[$rule] = [];
             }
@@ -211,8 +203,12 @@ readonly class SecurityGate implements GateInterface
     }
 
     /** @return array<int, string> */
-    private static function runSubCheck(SecuritySubCheck $subCheck, string $rule, int $releasedDays): array
-    {
+    private static function runSubCheck(
+        SecuritySubCheck $subCheck,
+        string $root,
+        string $rule,
+        int $releasedDays,
+    ): array {
         return self::stringList(match ($rule) {
             'hardcoded_secrets' => $subCheck->checkHardcodedSecrets(),
             'sql_injection' => $subCheck->checkSqlInjection(),
@@ -227,7 +223,7 @@ readonly class SecurityGate implements GateInterface
             'package_freshness' => $subCheck->checkPackageFreshness($releasedDays),
             'weak_cryptography' => $subCheck->checkWeakCryptography(),
             'cors_config' => $subCheck->checkCorsConfig(),
-            'npm_audit' => $subCheck->checkNpmAudit(),
+            'npm_audit' => (new DependencyAuditScanner($root))->checkNpmAudit(),
             'laravel_owasp' => $subCheck->checkLaravelOwasp(),
             'gitleaks' => $subCheck->checkGitleaks(),
             default => [],
@@ -238,14 +234,16 @@ readonly class SecurityGate implements GateInterface
     private static function stringList(mixed $value): array
     {
         if (!is_array($value)) {
-            return [];
+            throw new RuntimeException('Security sub-check returned an invalid result.');
         }
 
         $strings = [];
         foreach ($value as $item) {
-            if (is_string($item)) {
-                $strings[] = $item;
+            if (!is_string($item)) {
+                throw new RuntimeException('Security sub-check returned a non-string finding.');
             }
+
+            $strings[] = $item;
         }
 
         return $strings;

@@ -5,17 +5,21 @@ declare(strict_types=1);
 namespace B7S\Catraca\Gate;
 
 use Symfony\Component\Process\Process;
+use Throwable;
 
+use function array_is_list;
 use function file_get_contents;
+use function in_array;
 use function is_array;
 use function is_executable;
 use function is_string;
 use function json_decode;
+use function json_last_error;
 use function sprintf;
 use function str_starts_with;
 use function sys_get_temp_dir;
+use function tempnam;
 use function trim;
-use function uniqid;
 use function unlink;
 
 /**
@@ -55,7 +59,11 @@ final class GitleaksScanner
             return [];
         }
 
-        $reportPath = sys_get_temp_dir() . '/catraca-gitleaks-' . uniqid('', true) . '.json';
+        $reportPath = tempnam(sys_get_temp_dir(), 'catraca-gitleaks-');
+        if ($reportPath === false) {
+            return [$this->failure('could not create a report file', null)];
+        }
+
         $process = new Process(
             [
                 $binary,
@@ -73,25 +81,53 @@ final class GitleaksScanner
             $this->root,
             timeout: 180,
         );
-        $process->run();
-
-        $raw = @file_get_contents($reportPath);
-        if (is_string($raw)) {
+        try {
+            $process->run();
+        } catch (Throwable $exception) {
             @unlink($reportPath);
+
+            return [$this->failure('could not run', null)];
         }
 
-        $report = json_decode(is_string($raw) ? $raw : '[]', true);
-        if (!is_array($report)) {
-            return [];
+        $exitCode = $process->getExitCode();
+        $raw = @file_get_contents($reportPath);
+        @unlink($reportPath);
+
+        if (!in_array($exitCode, [0, 1], true)) {
+            return [$this->failure('exited', $exitCode)];
+        }
+
+        if (!is_string($raw)) {
+            return [$this->failure('returned no report', $exitCode)];
+        }
+
+        $raw = trim($raw);
+        $report = json_decode($raw, true);
+        if (
+            $raw === ''
+            || !str_starts_with($raw, '[')
+            || !is_array($report)
+            || !array_is_list($report)
+            || json_last_error() !== JSON_ERROR_NONE
+        ) {
+            return [$this->failure('returned invalid JSON', $exitCode)];
+        }
+
+        if ($exitCode === 1 && $report === []) {
+            return [$this->failure('exited', $exitCode)];
         }
 
         $findings = [];
         foreach ($report as $item) {
             if (!is_array($item)) {
-                continue;
+                return [$this->failure('returned an invalid report', $exitCode)];
             }
 
-            $file = (string) ($item['File'] ?? '');
+            $file = $item['File'] ?? null;
+            if (!is_string($file) || $file === '') {
+                return [$this->failure('returned an invalid report', $exitCode)];
+            }
+
             // gitleaks may report absolute paths when --source is absolute;
             // normalize to relative so the exclude filter and output stay clean
             $rootPrefix = $this->root . '/';
@@ -111,6 +147,13 @@ final class GitleaksScanner
         return $findings;
     }
 
+    private function failure(string $reason, ?int $exitCode): string
+    {
+        $status = $exitCode === null ? 'unknown' : (string) $exitCode;
+
+        return "gitleaks {$reason} with status {$status}";
+    }
+
     /**
      * Resolves an optional external binary: prefers a project-local
      * `vendor/bin/<name>`, then falls back to `$PATH` via `which`.
@@ -122,8 +165,13 @@ final class GitleaksScanner
             return $local;
         }
 
-        $which = new Process(['which', $name]);
-        $which->run();
+        try {
+            $which = new Process(['which', $name]);
+            $which->run();
+        } catch (Throwable) {
+            return null;
+        }
+
         if (!$which->isSuccessful()) {
             return null;
         }
