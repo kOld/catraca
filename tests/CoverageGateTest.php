@@ -12,9 +12,9 @@ use B7S\Catraca\GateResult;
 use B7S\Catraca\ToolResolver;
 use PHPUnit\Framework\TestCase;
 
+use function chmod;
 use function file_exists;
 use function file_put_contents;
-use function chmod;
 use function is_dir;
 use function mkdir;
 use function rmdir;
