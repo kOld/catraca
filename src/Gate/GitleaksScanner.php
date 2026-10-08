@@ -133,14 +133,7 @@ final class GitleaksScanner
             $rule = $item['RuleID'] ?? null;
             $line = $item['StartLine'] ?? null;
             $description = $item['Description'] ?? null;
-            if (
-                !is_string($rule)
-                || trim($rule) === ''
-                || !is_int($line)
-                || $line < 1
-                || !is_string($description)
-                || trim($description) === ''
-            ) {
+            if (!is_string($rule) || trim($rule) === '' || !is_int($line) || $line < 1 || !is_string($description)) {
                 return [$this->failure('returned an invalid report', $exitCode)];
             }
 

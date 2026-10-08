@@ -448,6 +448,32 @@ final class SecuritySubCheckTest extends TestCase
         self::assertStringContainsString('app/.env', $findings[0]);
     }
 
+    public function test_gitleaks_accepts_a_native_custom_rule_without_a_description(): void
+    {
+        if (!$this->gitleaksAvailable()) {
+            $this->markTestSkipped('gitleaks binary is not installed');
+        }
+
+        $this->write('.gitleaks.toml', <<<'TOML'
+            title = "Catraca test policy"
+
+            [extend]
+            useDefault = false
+
+            [[rules]]
+            id = "custom-token"
+            regex = '''CUSTOM-[A-Z0-9]{20}'''
+            TOML);
+        $this->write('app/source.env', "token=CUSTOM-ABCDEFGHIJKLMNOPQRST\n");
+
+        $sub = new SecuritySubCheck($this->tmpDir, [$this->tmpDir]);
+
+        $findings = $sub->checkGitleaks();
+
+        self::assertCount(1, $findings);
+        self::assertStringContainsString('[gitleaks:custom-token] app/source.env:1', $findings[0]);
+    }
+
     public function test_gitleaks_detects_a_synthetic_github_token_when_installed(): void
     {
         if (!$this->gitleaksAvailable()) {
