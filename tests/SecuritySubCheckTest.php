@@ -418,18 +418,14 @@ final class SecuritySubCheckTest extends TestCase
         $this->assertSame([], $findings);
     }
 
-    public function test_gitleaks_detects_a_hardcoded_aws_key_when_installed(): void
+    public function test_gitleaks_detects_a_synthetic_github_token_when_installed(): void
     {
         if (!$this->gitleaksAvailable()) {
             $this->markTestSkipped('gitleaks binary is not installed');
         }
 
-        $this->write('app/Config/secrets.php', <<<'PHP'
-            <?php
-            return [
-                'aws_key' => 'AKIAIOSFODNN7EXAMPLE',
-            ];
-            PHP);
+        $syntheticToken = 'ghp_' . '8f4J9x2M7pQ5vR3nT6kW1zC4hY9uB2dL7sQ5';
+        $this->write('app/Config/secrets.php', "<?php\nreturn ['github_token' => '{$syntheticToken}'];\n");
 
         $sub = new SecuritySubCheck($this->tmpDir, [$this->tmpDir]);
 
