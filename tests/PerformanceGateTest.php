@@ -49,6 +49,10 @@ final class PerformanceGateTest extends TestCase
                 echo json_encode(['files' => [['garbage' => true]]]);
                 exit(0);
             }
+            if (trim((string) file_get_contents($root . '/performance-mode')) === 'clean') {
+                echo json_encode(['files' => []]);
+                exit(0);
+            }
             echo json_encode([
                 'files' => [[
                     'name' => 'src/Sample.php',
@@ -61,15 +65,29 @@ final class PerformanceGateTest extends TestCase
             }
             exit(8);
             PHP);
+        file_put_contents($this->tmpDir . '/vendor/bin/mago', <<<'PHP'
+            #!/usr/bin/env php
+            <?php
+            if (in_array('--version', $argv, true)) {
+                echo "mago 1.52.0\n";
+                exit(0);
+            }
+            echo json_encode(['issues' => []]);
+            PHP);
         chmod($this->tmpDir . '/vendor/bin/php-cs-fixer', 0755);
+        chmod($this->tmpDir . '/vendor/bin/mago', 0755);
     }
 
     protected function tearDown(): void
     {
-        foreach (
-            ['catraca_baseline.json', 'performance-mode', 'vendor/bin/php-cs-fixer', 'src/Sample.php', '.catraca-cache/performance-php-cs-fixer.cache']
-            as $path
-        ) {
+        foreach ([
+            'catraca_baseline.json',
+            'performance-mode',
+            'vendor/bin/php-cs-fixer',
+            'vendor/bin/mago',
+            'src/Sample.php',
+            '.catraca-cache/performance-php-cs-fixer.cache',
+        ] as $path) {
             $absolutePath = $this->tmpDir . '/' . $path;
             if (file_exists($absolutePath)) {
                 unlink($absolutePath);
@@ -86,10 +104,11 @@ final class PerformanceGateTest extends TestCase
 
     public function test_informational_fixer_findings_are_reported_without_blocking(): void
     {
-        $baseline = $this->baseline(
-            ['no_unused_imports'],
-            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
-        );
+        $baseline = $this->baseline(['no_unused_imports'], [
+            'no_unused_imports' => true,
+            'autoload_optimization' => false,
+            'condition_order' => false,
+        ]);
 
         $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
 
@@ -101,10 +120,11 @@ final class PerformanceGateTest extends TestCase
 
     public function test_non_informational_fixer_findings_block(): void
     {
-        $baseline = $this->baseline(
-            [],
-            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
-        );
+        $baseline = $this->baseline([], [
+            'no_unused_imports' => true,
+            'autoload_optimization' => false,
+            'condition_order' => false,
+        ]);
 
         $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
 
@@ -115,10 +135,11 @@ final class PerformanceGateTest extends TestCase
     public function test_malformed_fixer_report_fails_closed(): void
     {
         file_put_contents($this->tmpDir . '/performance-mode', 'malformed');
-        $baseline = $this->baseline(
-            [],
-            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
-        );
+        $baseline = $this->baseline([], [
+            'no_unused_imports' => true,
+            'autoload_optimization' => false,
+            'condition_order' => false,
+        ]);
 
         $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
 
@@ -130,10 +151,11 @@ final class PerformanceGateTest extends TestCase
     public function test_fixer_crash_cannot_be_masked_by_informational_rules(): void
     {
         file_put_contents($this->tmpDir . '/performance-mode', 'crash');
-        $baseline = $this->baseline(
-            ['no_unused_imports'],
-            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
-        );
+        $baseline = $this->baseline(['no_unused_imports'], [
+            'no_unused_imports' => true,
+            'autoload_optimization' => false,
+            'condition_order' => false,
+        ]);
 
         $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
 
@@ -146,10 +168,11 @@ final class PerformanceGateTest extends TestCase
     public function test_fixer_report_with_an_invalid_file_shape_fails_closed(): void
     {
         file_put_contents($this->tmpDir . '/performance-mode', 'malformed-shape');
-        $baseline = $this->baseline(
-            ['no_unused_imports'],
-            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
-        );
+        $baseline = $this->baseline(['no_unused_imports'], [
+            'no_unused_imports' => true,
+            'autoload_optimization' => false,
+            'condition_order' => false,
+        ]);
 
         $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
 
@@ -176,14 +199,65 @@ final class PerformanceGateTest extends TestCase
         self::assertNull($result->current);
     }
 
-    /** @param array<int, string> $informationalRules @param array<string, bool> $rules */
-    private function baseline(array $informationalRules, array $rules, string $mode = 'no_regression'): Baseline
+    public function test_auto_chooses_php_cs_fixer_when_mago_cannot_cover_configured_rules(): void
     {
+        file_put_contents($this->tmpDir . '/performance-mode', 'clean');
+        $baseline = $this->baseline(
+            [],
+            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
+            'no_regression',
+            'auto',
+        );
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['php-cs-fixer'], $result->details['tools']);
+        self::assertSame([], $result->details['rules']['unexecuted']);
+    }
+
+    public function test_explicit_mago_rejects_unsupported_performance_backend(): void
+    {
+        $baseline = $this->baseline(
+            [],
+            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
+            'no_regression',
+            'mago',
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Mago does not implement Catraca performance rules');
+
+        (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+    }
+
+    public function test_unknown_informational_rule_cannot_make_an_unanalyzed_rule_pass(): void
+    {
+        $baseline = $this->baseline(['typo_rule'], [
+            'typo_rule' => true,
+            'autoload_optimization' => false,
+            'condition_order' => false,
+        ]);
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertNull($result->current);
+        self::assertSame(['typo_rule'], $result->details['rules']['unexecuted']);
+    }
+
+    /** @param array<int, string> $informationalRules @param array<string, bool> $rules */
+    private function baseline(
+        array $informationalRules,
+        array $rules,
+        string $mode = 'no_regression',
+        string $tool = 'php-cs-fixer',
+    ): Baseline {
         $baseline = new Baseline($this->tmpDir);
         $baseline->write([
             'config' => [
                 'source_dirs' => ['paths' => ['src']],
-                'tools' => ['lint' => 'php-cs-fixer'],
+                'tools' => ['lint' => $tool],
                 'performance' => [
                     'mode' => $mode,
                     'rules' => $rules,

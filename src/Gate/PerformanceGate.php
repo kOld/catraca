@@ -181,9 +181,14 @@ readonly class PerformanceGate implements GateInterface
             }
         }
         $unexecutedRules = array_values(array_unique(array_merge($unexecutedRules, $unsupportedRules)));
+        $knownRules = array_merge(array_keys($this->getRuleRegistry()), ['autoload_optimization', 'condition_order']);
         $blockingUnexecutedRules = array_values(array_filter(
             $unexecutedRules,
-            static fn(string $rule): bool => !in_array($rule, $informationalRules, true),
+            static fn(string $rule): bool => (
+                !in_array($rule, $informationalRules, true)
+                || in_array($rule, $unsupportedRules, true)
+                || !in_array($rule, $knownRules, true)
+            ),
         ));
         if ($unexecutedRules !== []) {
             $violations += count($blockingUnexecutedRules);
@@ -192,6 +197,29 @@ readonly class PerformanceGate implements GateInterface
                 static fn(string $rule): string => $rule . ' was not analyzed',
                 $unexecutedRules,
             ));
+        }
+
+        if ($blockingUnexecutedRules !== []) {
+            return new GateResult(
+                status: Status::Fail,
+                name: 'performance',
+                label: 'Performance',
+                message: sprintf('No executable analyzer for: %s', implode(', ', $blockingUnexecutedRules)),
+                severity: Severity::Block,
+                baseline: ['violations' => $baseline->getIntResult('performance', 'violations', 0)],
+                current: null,
+                details: [
+                    'rules' => [
+                        'configured' => array_keys(array_filter($enabledRules)),
+                        'analyzed' => array_values(array_unique($analyzedRules)),
+                        'unsupported' => $unsupportedRules,
+                        'unexecuted' => $unexecutedRules,
+                        'informational' => $informationalRules,
+                        'counts' => $ruleCounts,
+                    ],
+                    'tools' => array_values(array_unique($executedTools)),
+                ],
+            );
         }
 
         if (!$hasTool) {

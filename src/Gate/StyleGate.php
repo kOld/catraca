@@ -86,6 +86,10 @@ readonly class StyleGate implements GateInterface
         $output = $process->getOutput();
         $exitCode = $process->getExitCode();
 
+        if ($exitCode !== 0 && $exitCode !== 1) {
+            return $this->executionFailure($baseline, 'Pint', $exitCode, $output, $process->getErrorOutput());
+        }
+
         $violations = 0;
         $files = [];
 
