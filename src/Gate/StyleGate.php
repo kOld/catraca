@@ -119,8 +119,7 @@ readonly class StyleGate implements GateInterface
                 $violations = count($dirtyFiles);
                 $files = array_values(array_map(static fn(string $f): string => trim($f), $dirtyFiles));
             } else {
-                $violations = 1;
-                $files[] = 'Run `pint --test` for details or fix with `pint`';
+                return $this->executionFailure($baseline, 'Pint', $exitCode, $output, $process->getErrorOutput());
             }
         }
 
@@ -146,20 +145,44 @@ readonly class StyleGate implements GateInterface
 
         $result = CsFixerResultParser::parseJsonOutput($process->getOutput());
 
-        if (!$result['valid']) {
-            $result['violations'] = max(1, $result['violations']);
-            $result['files'][] = 'PHP CS Fixer returned an invalid JSON report';
-        }
-        if ($result['violations'] === 0 && $process->getExitCode() !== 0) {
-            $result['violations'] =
-                substr_count($process->getOutput(), '1)') + substr_count($process->getOutput(), '2)');
-            if ($result['violations'] === 0) {
-                $result['violations'] = 1;
-                $result['files'][] = 'PHP CS Fixer failed with exit code ' . ($process->getExitCode() ?? 'unknown');
-            }
+        if (!$result['valid'] || !in_array($process->getExitCode(), [0, 8], true)) {
+            return $this->executionFailure(
+                $baseline,
+                'PHP CS Fixer',
+                $process->getExitCode(),
+                $process->getOutput(),
+                $process->getErrorOutput(),
+            );
         }
 
         return $this->buildStyleResult($result['violations'], $result['files'], $baseline, toolName: 'PHP CS Fixer');
+    }
+
+    private function executionFailure(
+        Baseline $baseline,
+        string $toolName,
+        ?int $exitCode,
+        string $output,
+        string $errorOutput,
+    ): GateResult {
+        return new GateResult(
+            status: Status::Fail,
+            name: 'style',
+            label: 'Code Style',
+            message: sprintf(
+                '%s failed or returned an invalid report (exit code %s).',
+                $toolName,
+                $exitCode ?? 'unknown',
+            ),
+            severity: Severity::Block,
+            baseline: ['violations' => $baseline->getResult('style', 'violations', 0)],
+            current: null,
+            details: [
+                'stdout' => $output,
+                'stderr' => $errorOutput,
+                'exit_code' => $exitCode,
+            ],
+        );
     }
 
     /**
