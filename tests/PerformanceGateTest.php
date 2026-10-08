@@ -44,6 +44,35 @@ final class PerformanceGateTest extends TestCase
                 if (str_starts_with($argument, '--cache-file=')) {
                     file_put_contents(substr($argument, strlen('--cache-file=')), 'cache');
                 }
+                if (str_starts_with($argument, '--rules=')) {
+                    file_put_contents(
+                        $root . '/performance-rules.json',
+                        substr($argument, strlen('--rules=')),
+                    );
+                }
+            }
+            if (trim((string) file_get_contents($root . '/performance-mode')) === 'all-rules') {
+                echo json_encode([
+                    'files' => [[
+                        'name' => 'src/Sample.php',
+                        'appliedFixers' => [
+                            'global_namespace_import',
+                            'no_unused_imports',
+                            'fully_qualified_strict_types',
+                            'lambda_not_used_import',
+                            'native_function_invocation',
+                            'no_redundant_readonly_property',
+                            'static_lambda',
+                            'array_push',
+                            'ereg_to_preg',
+                            'modernize_strpos',
+                            'pow_to_exponentiation',
+                            'random_api_migration',
+                            'set_type_to_cast',
+                        ],
+                    ]],
+                ]);
+                exit(8);
             }
             if (trim((string) file_get_contents($root . '/performance-mode')) === 'malformed-shape') {
                 echo json_encode(['files' => [['garbage' => true]]]);
@@ -75,6 +104,7 @@ final class PerformanceGateTest extends TestCase
             'performance-mode',
             'vendor/bin/php-cs-fixer',
             'src/Sample.php',
+            'performance-rules.json',
             '.catraca-cache/performance-php-cs-fixer.cache',
         ] as $path) {
             $absolutePath = $this->tmpDir . '/' . $path;
@@ -203,6 +233,25 @@ final class PerformanceGateTest extends TestCase
         self::assertSame(Status::Pass, $result->status);
         self::assertSame(['php-cs-fixer'], $result->details['tools']);
         self::assertSame([], $result->details['rules']['unexecuted']);
+    }
+
+    public function test_all_enabled_registry_rules_are_sent_in_one_native_fixer_payload(): void
+    {
+        file_put_contents($this->tmpDir . '/performance-mode', 'all-rules');
+        $rules = array_fill_keys(array_keys(PerformanceGate::getRuleRegistry()), true);
+        $rules['autoload_optimization'] = false;
+        $rules['condition_order'] = false;
+        $baseline = $this->baseline([], $rules);
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Fail, $result->status);
+        self::assertSame(['violations' => 13], $result->current);
+        self::assertSame(
+            array_keys(PerformanceGate::getRuleRegistry()),
+            array_keys(json_decode((string) file_get_contents($this->tmpDir . '/performance-rules.json'), true)),
+        );
+        self::assertCount(13, $result->details['rules']['counts']);
     }
 
     public function test_unknown_informational_rule_cannot_make_an_unanalyzed_rule_pass(): void
