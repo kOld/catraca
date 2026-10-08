@@ -29,7 +29,7 @@ Gates run in order. A failure blocks the PR.
 | 5 | Duplication | PHPCPD | 0% maximum |
 | 6 | File Size | Built-in | 1000 lines per file |
 | 7 | Cyclomatic Complexity | PHP Metrics | Block at 50, warn at 20 |
-| 8 | Performance | Mago lint -> PHP CS Fixer, plus built-in checks | 0 violations |
+| 8 | Performance | PHP CS Fixer, plus built-in checks | 0 violations |
 
 ## Dependencies
 
@@ -223,13 +223,13 @@ For gates with interchangeable backends, set the value under `config.tools` to `
 | Code Style | `format` | `auto`, `mago`, `pint`, `php-cs-fixer` | `mago format --check`, Pint, or PHP CS Fixer |
 | Static Analysis | `analyze` | `auto`, `mago`, `phpstan`, `psalm` | `mago analyze`, PHPStan, or Psalm |
 | Test Coverage | `coverage` | `auto`, `pest`, `phpunit` | Pest or PHPUnit with Clover output |
-| Performance | `lint` | `auto`, `mago`, `php-cs-fixer` | PHP CS Fixer plus built-in autoload and condition-order checks |
+| Performance | `lint` | `auto`, `php-cs-fixer` | PHP CS Fixer plus built-in autoload and condition-order checks |
 | Security | Not selectable | — | Composer audit plus built-in source checks |
 | Duplication | Not selectable | — | PHPCPD |
 | File Size | Not selectable | — | Built-in scanner |
 | Complexity | Not selectable | — | PHP Metrics |
 
-`auto` is the v2 default. It selects the first compatible installed tool in the order shown in the Quality Gates table. Mago remains preferred for style and static analysis. The performance rules are Catraca's PHP CS Fixer rule registry, so auto mode skips Mago for that gate and selects PHP CS Fixer when it is available. An explicit `lint: mago` configuration fails with a clear unsupported-backend error instead of silently running only part of the configured rules.
+`auto` is the v2 default. It selects the first compatible installed tool in the order shown in the Quality Gates table. Mago remains preferred for style and static analysis. The performance rules are Catraca's PHP CS Fixer rule registry, so PHP CS Fixer is the only supported performance backend. An explicit `lint: mago` configuration is rejected during configuration validation instead of silently running only part of the configured rules.
 
 **Example — Switching from Mago to PHPStan + Pint + PHPUnit:**
 

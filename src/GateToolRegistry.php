@@ -22,7 +22,7 @@ final class GateToolRegistry
         'style' => ['mago', 'pint', 'php-cs-fixer'],
         'static_analysis' => ['mago', 'phpstan', 'psalm'],
         'coverage' => ['pest', 'phpunit'],
-        'performance' => ['mago', 'php-cs-fixer'],
+        'performance' => ['php-cs-fixer'],
     ];
 
     public const array OPERATIONS = [
@@ -35,8 +35,6 @@ final class GateToolRegistry
     public static function resolve(Baseline $baseline, ToolResolver $resolver, string $gate): ?GateTool
     {
         $selected = $baseline->getGateTool($gate);
-        $unsupportedMagoPerformance = false;
-
         foreach (self::candidates($baseline, $gate) as $name) {
             $path = $resolver->resolve($name);
             if ($path === null) {
@@ -60,25 +58,7 @@ final class GateToolRegistry
                 }
             }
 
-            if ($gate === 'performance' && $name === 'mago') {
-                if ($selected !== self::DEFAULT) {
-                    throw new RuntimeException(
-                        'Mago does not implement Catraca performance rules; choose php-cs-fixer for the performance gate.',
-                    );
-                }
-
-                $unsupportedMagoPerformance = true;
-
-                continue;
-            }
-
             return new GateTool($name, $path);
-        }
-
-        if ($unsupportedMagoPerformance) {
-            throw new RuntimeException(
-                'Mago is installed but cannot implement Catraca performance rules; install php-cs-fixer or select a compatible analyzer.',
-            );
         }
 
         return null;

@@ -7,11 +7,9 @@ namespace B7S\Catraca\Fixer;
 use B7S\Catraca\Baseline;
 use B7S\Catraca\Gate\PerformanceGate;
 use B7S\Catraca\GateToolRegistry;
-use B7S\Catraca\MagoRunner;
 use B7S\Catraca\ProcessRunner;
 use B7S\Catraca\SourcePathResolver;
 use B7S\Catraca\ToolResolver;
-use Throwable;
 
 use function is_array;
 
@@ -20,7 +18,6 @@ readonly class PerformanceFixer implements FixerInterface
     public function __construct(
         private ProcessRunner $runner = new ProcessRunner(),
         private SourcePathResolver $pathResolver = new SourcePathResolver(),
-        private MagoRunner $magoRunner = new MagoRunner(),
     ) {}
 
     public function getLabel(): string
@@ -31,35 +28,9 @@ readonly class PerformanceFixer implements FixerInterface
     public function fix(Baseline $baseline, ToolResolver $resolver): FixerResult
     {
         $tool = GateToolRegistry::resolve($baseline, $resolver, 'performance');
-        if ($tool !== null && $tool->name === 'mago') {
-            $mago = $tool->path;
-            try {
-                $result = $this->magoRunner->fixLint(
-                    $mago,
-                    $this->pathResolver->resolveForBaseline($baseline),
-                    $baseline,
-                );
-
-                if ($result->exitCode === 0) {
-                    return new FixerResult(label: 'Performance (Mago lint)', fixed: true);
-                }
-
-                return new FixerResult(
-                    label: 'Performance (Mago lint)',
-                    message: 'issues remain after applying safe fixes',
-                );
-            } catch (Throwable $exception) {
-                return new FixerResult(label: 'Performance (Mago lint)', message: $exception->getMessage());
-            }
-        }
-
         $fixer = $tool !== null && $tool->name === 'php-cs-fixer' ? $tool->path : null;
         if ($fixer === null) {
-            return new FixerResult(
-                label: $this->getLabel(),
-                skipped: true,
-                message: 'skipped (install mago or php-cs-fixer)',
-            );
+            return new FixerResult(label: $this->getLabel(), skipped: true, message: 'skipped (install php-cs-fixer)');
         }
 
         $enabledRules = $baseline->getArrayConfig('performance', 'rules', []);

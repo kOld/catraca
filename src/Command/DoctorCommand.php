@@ -48,7 +48,7 @@ final class DoctorCommand extends ProjectCommand
             [
                 'Mago minimum',
                 $baseline->getMagoMinimumVersion(),
-                'preferred v2 backend',
+                'style/static analysis backend',
             ],
             [
                 'Mago installed',
@@ -69,6 +69,11 @@ final class DoctorCommand extends ProjectCommand
                 extension_loaded('pcov') || extension_loaded('xdebug') ? 'available' : 'coverage unavailable',
             ],
             ['Source scope', implode(', ', (new SourcePathResolver())->resolveForBaseline($baseline)), 'resolved'],
+            [
+                'Performance backend',
+                implode(', ', GateToolRegistry::FALLBACKS['performance']),
+                'Catraca fixer rule registry',
+            ],
         ];
 
         foreach (GateToolRegistry::gates() as $gate) {

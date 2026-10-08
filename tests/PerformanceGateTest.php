@@ -65,17 +65,7 @@ final class PerformanceGateTest extends TestCase
             }
             exit(8);
             PHP);
-        file_put_contents($this->tmpDir . '/vendor/bin/mago', <<<'PHP'
-            #!/usr/bin/env php
-            <?php
-            if (in_array('--version', $argv, true)) {
-                echo "mago 1.52.0\n";
-                exit(0);
-            }
-            echo json_encode(['issues' => []]);
-            PHP);
         chmod($this->tmpDir . '/vendor/bin/php-cs-fixer', 0755);
-        chmod($this->tmpDir . '/vendor/bin/mago', 0755);
     }
 
     protected function tearDown(): void
@@ -84,7 +74,6 @@ final class PerformanceGateTest extends TestCase
             'catraca_baseline.json',
             'performance-mode',
             'vendor/bin/php-cs-fixer',
-            'vendor/bin/mago',
             'src/Sample.php',
             '.catraca-cache/performance-php-cs-fixer.cache',
         ] as $path) {
@@ -214,21 +203,6 @@ final class PerformanceGateTest extends TestCase
         self::assertSame(Status::Pass, $result->status);
         self::assertSame(['php-cs-fixer'], $result->details['tools']);
         self::assertSame([], $result->details['rules']['unexecuted']);
-    }
-
-    public function test_explicit_mago_rejects_unsupported_performance_backend(): void
-    {
-        $baseline = $this->baseline(
-            [],
-            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
-            'no_regression',
-            'mago',
-        );
-
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Mago does not implement Catraca performance rules');
-
-        (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
     }
 
     public function test_unknown_informational_rule_cannot_make_an_unanalyzed_rule_pass(): void

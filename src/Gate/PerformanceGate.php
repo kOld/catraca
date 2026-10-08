@@ -13,7 +13,6 @@ use B7S\Catraca\Enum\Status;
 use B7S\Catraca\GateInterface;
 use B7S\Catraca\GateResult;
 use B7S\Catraca\GateToolRegistry;
-use B7S\Catraca\MagoRunner;
 use B7S\Catraca\SourcePathResolver;
 use B7S\Catraca\ToolResolver;
 use Symfony\Component\Process\Process;
@@ -46,7 +45,6 @@ readonly class PerformanceGate implements GateInterface
 
     public function __construct(
         private SourcePathResolver $pathResolver = new SourcePathResolver(),
-        private MagoRunner $magoRunner = new MagoRunner(),
     ) {}
 
     public function run(Baseline $baseline, ToolResolver $resolver): GateResult
@@ -65,27 +63,10 @@ readonly class PerformanceGate implements GateInterface
 
         $enabledRules = $this->getEnabledRules($baseline);
         $tool = GateToolRegistry::resolve($baseline, $resolver, 'performance');
-        $mago = $tool !== null && $tool->name === 'mago' ? $tool->path : null;
         $fixer = $tool !== null && $tool->name === 'php-cs-fixer' ? $tool->path : null;
         $paths = $this->pathResolver->resolveForBaseline($baseline);
 
-        if ($mago !== null) {
-            $result = $this->magoRunner->diagnostics($mago, 'lint', $paths, $baseline);
-            $hasTool = true;
-            $executedTools[] = 'mago';
-            $analyzedRules = ['autoload_optimization', 'condition_order'];
-            $violations = $result->issueCount();
-            $files = $result->files();
-
-            foreach ($result->issues as $issue) {
-                $prefix = $issue['code'] === '' ? '' : $issue['code'] . ': ';
-                $reasons[] = $prefix . $issue['message'];
-            }
-
-            if ($violations > self::MAX_VIOLATIONS) {
-                $messages[] = sprintf('%d Mago lint improvement(s) available', $violations);
-            }
-        } elseif ($fixer !== null) {
+        if ($fixer !== null) {
             $rulesJson = self::buildRulesJson($enabledRules);
 
             if ($rulesJson !== '{}') {
