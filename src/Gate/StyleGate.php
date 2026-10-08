@@ -16,6 +16,7 @@ use B7S\Catraca\MagoRunner;
 use B7S\Catraca\SourcePathResolver;
 use B7S\Catraca\ToolResolver;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 use function array_slice;
 use function count;
@@ -139,27 +140,48 @@ readonly class StyleGate implements GateInterface
     private function runCsFixer(string $fixer, Baseline $baseline, ToolResolver $resolver): GateResult
     {
         $paths = $this->pathResolver->resolveForBaseline($baseline);
-        $cmd = [$resolver->resolvePhp(), $fixer, 'fix', '--dry-run', '--diff', '--format=json'];
-        foreach ($paths as $path) {
-            $cmd[] = $path;
+        try {
+            $pathConfig = PhpCsFixerPathConfig::prepare($resolver->getProjectRoot(), $paths);
+        } catch (Throwable $exception) {
+            return $this->executionFailure($baseline, 'PHP CS Fixer', null, '', $exception->getMessage());
         }
 
-        $process = new Process($cmd, timeout: $baseline->getGateTimeout('style'));
-        $process->run();
+        try {
+            $cmd = [
+                $resolver->resolvePhp(),
+                $fixer,
+                'fix',
+                '--dry-run',
+                '--diff',
+                '--format=json',
+                ...$pathConfig->arguments(),
+            ];
+            $process = new Process($cmd, timeout: $baseline->getGateTimeout('style'));
+            $process->run();
 
-        $result = CsFixerResultParser::parseJsonOutput($process->getOutput());
+            $result = CsFixerResultParser::parseJsonOutput($process->getOutput());
 
-        if (!$result['valid'] || !in_array($process->getExitCode(), [0, 8], true)) {
-            return $this->executionFailure(
+            if (!$result['valid'] || !in_array($process->getExitCode(), [0, 8], true)) {
+                return $this->executionFailure(
+                    $baseline,
+                    'PHP CS Fixer',
+                    $process->getExitCode(),
+                    $process->getOutput(),
+                    $process->getErrorOutput(),
+                );
+            }
+
+            return $this->buildStyleResult(
+                $result['violations'],
+                $result['files'],
                 $baseline,
-                'PHP CS Fixer',
-                $process->getExitCode(),
-                $process->getOutput(),
-                $process->getErrorOutput(),
+                toolName: 'PHP CS Fixer',
             );
+        } catch (Throwable $exception) {
+            return $this->executionFailure($baseline, 'PHP CS Fixer', null, '', $exception->getMessage());
+        } finally {
+            $pathConfig->cleanup();
         }
-
-        return $this->buildStyleResult($result['violations'], $result['files'], $baseline, toolName: 'PHP CS Fixer');
     }
 
     private function executionFailure(

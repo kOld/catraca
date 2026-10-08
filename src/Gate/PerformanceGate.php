@@ -16,6 +16,7 @@ use B7S\Catraca\GateToolRegistry;
 use B7S\Catraca\SourcePathResolver;
 use B7S\Catraca\ToolResolver;
 use Symfony\Component\Process\Process;
+use Throwable;
 
 use function array_filter;
 use function array_keys;
@@ -398,46 +399,76 @@ readonly class PerformanceGate implements GateInterface
             ];
         }
 
-        $cmd = [
-            $resolver->resolvePhp(),
-            $fixer,
-            'fix',
-            '--dry-run',
-            '--diff',
-            '--allow-risky=yes',
-            '--using-cache=yes',
-            '--cache-file=' . $cacheFile,
-            '--format=json',
-            '--verbose',
-            '--rules=' . $rulesJson,
-        ];
-        foreach ($paths as $path) {
-            $cmd[] = $path;
+        try {
+            $pathConfig = PhpCsFixerPathConfig::prepare($resolver->getProjectRoot(), $paths, $rulesJson);
+        } catch (Throwable $exception) {
+            return [
+                'violations' => 1,
+                'files' => ['Unable to prepare PHP CS Fixer paths'],
+                'rule_counts' => [],
+                'unsupported_rules' => [],
+                'valid' => false,
+                'stdout' => '',
+                'stderr' => $exception->getMessage(),
+                'exit_code' => null,
+            ];
         }
 
-        /** @var array<int, string> $cmd */
-        $process = new Process($cmd, timeout: $timeout);
-        $process->run();
+        try {
+            $cmd = [
+                $resolver->resolvePhp(),
+                $fixer,
+                'fix',
+                '--dry-run',
+                '--diff',
+                '--allow-risky=yes',
+                '--using-cache=yes',
+                '--cache-file=' . $cacheFile,
+                '--format=json',
+                '--verbose',
+                ...$pathConfig->arguments(),
+            ];
 
-        $result = CsFixerResultParser::parseJsonOutput($process->getOutput());
-        $result['stdout'] = $process->getOutput();
-        $result['stderr'] = $process->getErrorOutput();
-        $result['exit_code'] = $process->getExitCode();
-        if (!in_array($process->getExitCode(), [0, 8], true)) {
+            /** @var array<int, string> $cmd */
+            $process = new Process($cmd, timeout: $timeout);
+            $process->run();
+            $stdout = $process->getOutput();
+            $stderr = $process->getErrorOutput();
+            $exitCode = $process->getExitCode();
+        } catch (Throwable $exception) {
+            return [
+                'violations' => 1,
+                'files' => ['PHP CS Fixer execution failed'],
+                'rule_counts' => [],
+                'unsupported_rules' => [],
+                'valid' => false,
+                'stdout' => '',
+                'stderr' => $exception->getMessage(),
+                'exit_code' => null,
+            ];
+        } finally {
+            $pathConfig->cleanup();
+        }
+
+        $result = CsFixerResultParser::parseJsonOutput($stdout);
+        $result['stdout'] = $stdout;
+        $result['stderr'] = $stderr;
+        $result['exit_code'] = $exitCode;
+        if (!in_array($exitCode, [0, 8], true)) {
             $result['valid'] = false;
         }
         if (!$result['valid']) {
             $result['violations'] = max(1, $result['violations']);
             $result['files'][] = 'PHP CS Fixer returned an invalid JSON report';
         }
-        if ($result['violations'] === 0 && $process->getExitCode() !== 0) {
+        if ($result['violations'] === 0 && $exitCode !== 0) {
             $result['violations'] = 1;
-            $result['files'][] = 'PHP CS Fixer failed with exit code ' . ($process->getExitCode() ?? 'unknown');
+            $result['files'][] = 'PHP CS Fixer failed with exit code ' . ($exitCode ?? 'unknown');
         }
 
         $unsupportedRules = [];
-        if (!in_array($process->getExitCode(), [0, 8], true)) {
-            $errorOutput = strtolower($process->getErrorOutput());
+        if (!in_array($exitCode, [0, 8], true)) {
+            $errorOutput = strtolower($stderr);
             foreach (array_keys(self::getRuleRegistry()) as $rule) {
                 if (
                     str_contains($errorOutput, strtolower($rule))

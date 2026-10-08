@@ -12,6 +12,7 @@ use B7S\Catraca\ToolResolver;
 use PHPUnit\Framework\TestCase;
 
 use function chmod;
+use function escapeshellarg;
 use function file_exists;
 use function file_put_contents;
 use function is_dir;
@@ -106,6 +107,9 @@ final class PerformanceGateTest extends TestCase
             'src/Sample.php',
             'performance-rules.json',
             '.catraca-cache/performance-php-cs-fixer.cache',
+            '.php-cs-fixer.cache',
+            'src/first/Sample.php',
+            'src/second/Sample.php',
         ] as $path) {
             $absolutePath = $this->tmpDir . '/' . $path;
             if (file_exists($absolutePath)) {
@@ -114,6 +118,12 @@ final class PerformanceGateTest extends TestCase
         }
         if (is_dir($this->tmpDir . '/.catraca-cache')) {
             rmdir($this->tmpDir . '/.catraca-cache');
+        }
+        if (is_dir($this->tmpDir . '/src/first')) {
+            rmdir($this->tmpDir . '/src/first');
+        }
+        if (is_dir($this->tmpDir . '/src/second')) {
+            rmdir($this->tmpDir . '/src/second');
         }
         rmdir($this->tmpDir . '/src');
         rmdir($this->tmpDir . '/vendor/bin');
@@ -218,6 +228,27 @@ final class PerformanceGateTest extends TestCase
         self::assertNull($result->current);
     }
 
+    public function test_native_php_cs_fixer_accepts_multiple_source_directories(): void
+    {
+        mkdir($this->tmpDir . '/src/first', 0755, true);
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/first/Sample.php', "<?php\n");
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+        file_put_contents($this->tmpDir . '/performance-mode', 'clean');
+
+        $baseline = $this->baseline(
+            [],
+            ['no_unused_imports' => true, 'autoload_optimization' => false, 'condition_order' => false],
+            sourcePaths: ['src/first', 'src/second'],
+        );
+
+        $result = (new PerformanceGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+    }
+
     public function test_auto_chooses_php_cs_fixer_when_mago_cannot_cover_configured_rules(): void
     {
         file_put_contents($this->tmpDir . '/performance-mode', 'clean');
@@ -275,11 +306,12 @@ final class PerformanceGateTest extends TestCase
         array $rules,
         string $mode = 'no_regression',
         string $tool = 'php-cs-fixer',
+        array $sourcePaths = ['src'],
     ): Baseline {
         $baseline = new Baseline($this->tmpDir);
         $baseline->write([
             'config' => [
-                'source_dirs' => ['paths' => ['src']],
+                'source_dirs' => ['paths' => $sourcePaths],
                 'tools' => ['lint' => $tool],
                 'performance' => [
                     'mode' => $mode,
@@ -291,5 +323,20 @@ final class PerformanceGateTest extends TestCase
         ]);
 
         return $baseline;
+    }
+
+    private function writeNativeFixerProxy(): void
+    {
+        $realFixer = dirname(__DIR__) . '/vendor/bin/php-cs-fixer';
+        file_put_contents(
+            $this->tmpDir . '/vendor/bin/php-cs-fixer',
+            "#!/usr/bin/env php\n<?php\n"
+            . "\$command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg("
+            . var_export($realFixer, true)
+            . ");\n"
+            . "\$command .= ' ' . implode(' ', array_map('escapeshellarg', array_slice(\$argv, 1)));\n"
+            . "passthru(\$command, \$exitCode);\nexit(\$exitCode);\n",
+        );
+        chmod($this->tmpDir . '/vendor/bin/php-cs-fixer', 0755);
     }
 }

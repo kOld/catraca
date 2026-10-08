@@ -13,8 +13,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 use function chmod;
+use function escapeshellarg;
 use function file_exists;
 use function file_put_contents;
+use function is_dir;
 use function mkdir;
 use function rmdir;
 use function sys_get_temp_dir;
@@ -55,6 +57,18 @@ final class StyleGateTest extends TestCase
                 unlink($absolutePath);
             }
         }
+        foreach (['src/first/Sample.php', 'src/second/Sample.php', '.php-cs-fixer.cache'] as $path) {
+            $absolutePath = $this->tmpDir . '/' . $path;
+            if (file_exists($absolutePath)) {
+                unlink($absolutePath);
+            }
+        }
+        if (is_dir($this->tmpDir . '/src/first')) {
+            rmdir($this->tmpDir . '/src/first');
+        }
+        if (is_dir($this->tmpDir . '/src/second')) {
+            rmdir($this->tmpDir . '/src/second');
+        }
         rmdir($this->tmpDir . '/src');
         rmdir($this->tmpDir . '/vendor/bin');
         rmdir($this->tmpDir . '/vendor');
@@ -83,6 +97,29 @@ final class StyleGateTest extends TestCase
         self::assertNull($result->current);
     }
 
+    public function test_native_php_cs_fixer_accepts_multiple_source_directories(): void
+    {
+        mkdir($this->tmpDir . '/src/first', 0755, true);
+        mkdir($this->tmpDir . '/src/second', 0755, true);
+        file_put_contents($this->tmpDir . '/src/first/Sample.php', "<?php\n");
+        file_put_contents($this->tmpDir . '/src/second/Sample.php', "<?php\n");
+        $this->writeNativeFixerProxy();
+
+        $baseline = new Baseline($this->tmpDir);
+        $baseline->write([
+            'config' => [
+                'source_dirs' => ['paths' => ['src/first', 'src/second']],
+                'tools' => ['format' => 'php-cs-fixer'],
+            ],
+            'results' => [],
+        ]);
+
+        $result = (new StyleGate())->run($baseline, new ToolResolver($this->tmpDir));
+
+        self::assertSame(Status::Pass, $result->status);
+        self::assertSame(['violations' => 0], $result->current);
+    }
+
     /** @return array<string, array{tool: string, mode: string}> */
     public static function executionFailureCases(): array
     {
@@ -92,5 +129,20 @@ final class StyleGateTest extends TestCase
             'php cs fixer no regression' => ['tool' => 'php-cs-fixer', 'mode' => 'no_regression'],
             'php cs fixer informational' => ['tool' => 'php-cs-fixer', 'mode' => 'informational'],
         ];
+    }
+
+    private function writeNativeFixerProxy(): void
+    {
+        $realFixer = dirname(__DIR__) . '/vendor/bin/php-cs-fixer';
+        file_put_contents(
+            $this->tmpDir . '/vendor/bin/php-cs-fixer',
+            "#!/usr/bin/env php\n<?php\n"
+            . "\$command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg("
+            . var_export($realFixer, true)
+            . ");\n"
+            . "\$command .= ' ' . implode(' ', array_map('escapeshellarg', array_slice(\$argv, 1)));\n"
+            . "passthru(\$command, \$exitCode);\nexit(\$exitCode);\n",
+        );
+        chmod($this->tmpDir . '/vendor/bin/php-cs-fixer', 0755);
     }
 }
